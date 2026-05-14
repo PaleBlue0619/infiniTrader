@@ -3,7 +3,7 @@ from typing import Literal, Dict, List
 # 从 base 库中导入定义参数和状态映射模型必须的三个方法
 from pythongo.base import BaseParams, BaseState, Field, BaseStrategy
 from pythongo.classdef import KLineData, OrderData, TickData, TradeData
-from pythongo.core import KLineStyleType
+from pythongo.core import KLineStyleType, MarketCenter
 from pythongo.utils import KLineGenerator
 
 def product_formatter(productList: List[str], formatDict: Dict[str, List]) -> List[str]:
@@ -140,13 +140,20 @@ class myStrategy(BaseStrategy):
             "y": ["DCE", 4],
             "zn": ["SHFE", 4]
         }
-        self.posDict = {}
+        self.posDict: Dict[str, Dict[str, any]] = {}    # 前一个交易日收盘时的持仓状态字典
+        self.monitorCont: List[str] = ["AG2606.SHF","AP2610.ZCE"]   # 所有需要被监视的合约列表
+        self.monitorCont = contract_formatter(contractList=self.monitorCont, formatDict=self.formatDict)
+        self.monitorExchange: List[str] = []    # 所有需要被监视的合约列表对应的交易所
+        for i in self.monitorCont:
+            product = "".join(j for j in i if j.isalpha())
+            self.monitorExchange.append(self.formatDict[product][0])    # 被监视合约对应的交易所信息
         """
         {"AU2501": {"start_date", "end_date", "price", "static_high", "static_low"}
         }
         """
-        self.productList: List[str] = ["", ""]
-        self.kline_generatorDict: Dict[str, KLineGenerator] = {}    # 所有品种的1分钟K线合成器
+        self.market_center = MarketCenter()
+        self.klineDict: Dict[str, KLineData] = {}
+        self.kline_generators: dict[str, KLineGenerator] = {}    # 所有品种的1分钟K线合成器
         # 确定当日所有需要监控的品种列表(为了节省轮寻时间 -> 只对需要交易的品种进行实时监控)
 
     def on_init(self) -> None:
@@ -154,6 +161,45 @@ class myStrategy(BaseStrategy):
 
     def on_start(self) -> None:
         """策略启动的回调函数"""
-        self.reset_state()
-        # 初始K线合成器
+        # 每个合约获取最近1根1分钟K线
+        for exchange, contract in zip(self.monitorExchange, self.monitorCont):
+            kline_generator = KLineGenerator(
+                real_time_callback = None,
+                callBack = None,
+                exchange = exchange,
+                instrument_id = contract,
+                style = "M1"
+            ) # 代表一分钟K线 -> 详见https://infinitrader.quantdo.com.cn/pythongo_v2/modules/pythongo_core#klinestyle
 
+        # 每个合约订阅行情
+        for exchange, contract in zip(self.monitorExchange, self.monitorCont):
+            self.sub_market_data(
+                exchange=exchange,
+                instrument_id=contract
+            )
+        # 初始化K线合成器
+        super().on_start()
+
+    def on_tick(self, tick: TickData) -> None:
+        """tick回调函数 -> 用于用户级别开平仓 + """
+        self.output(tick)
+
+    def on_stop(self) -> None:
+        super().on_stop()
+
+        # 每个合约取消订阅行情
+        for exchange, contract in zip(self.monitorExchange, self.monitorCont):
+            self.unsub_market_data(
+                exchange=exchange,
+                instrument_id=contract
+            )
+    #
+    # def callback_kbar(self, kline: KLineData) -> None:
+    #     """
+    #     K线合成后的回调函数
+    #     """
+    #     # OHLCV数据
+    #     # self.calc_indicator()
+    #     self.update_status_bar()
+    #
+    #
