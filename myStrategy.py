@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Literal, Dict, List
 
 # 从 base 库中导入定义参数和状态映射模型必须的三个方法
 from pythongo.base import BaseParams, BaseState, Field, BaseStrategy
@@ -6,25 +6,37 @@ from pythongo.classdef import KLineData, OrderData, TickData, TradeData
 from pythongo.core import KLineStyleType
 from pythongo.utils import KLineGenerator
 
+def product_formatter(productList: List[str], formatDict: Dict[str, List]) -> List[str]:
+    """把品种代码映射为无限易的代码"""
+    lower_product_list = [str(i).lower() for i in formatDict.keys()]
+    format_product_list = list(formatDict.keys())
+    format_value_list = list(formatDict.values())
+    resultList: List[str] = []
+    for i in productList:
+        formatted_product = str(i).lower()
+        idx = format_product_list.index(str(i).lower())
+        resultList.append(format_product_list[idx])
+        # [exchange, strLen] = formatDict[formatted_product]
+    return resultList
+
+def contract_formatter(contractList: List[str], formatDict: Dict[str, List]) -> List[str]:
+    """把合约代码映射为无限易的代码"""
+    return
+
 class Params(BaseParams):
     """参数映射模型 -> 从无限易窗口中传入的参数定义的值
     Field: 自定义元数据->添加至参数映射模型的字段中
     default: 定义这个参数的默认值
     title: 定义这个参数的中文明 -> 会在PythonGO中显示
     """
-    exchange: str = Field(default="", title="交易所代码")
-    instrument_id: str = Field(default="", title="合约代码")
-    order_price: int | float = Field(default=0, title="报单价格")
-    order_volume: int = Field(default=1, title="报单手数")
-    order_direction: Literal["buy", "sell"] = Field(default="buy", title="报单方向")
-
+    # 这里说白了就是方便单品种时序CTA固定策略, 然后在不更换模板的情况下换品种执行, 如果是多品种CTA策略可以跳过这一步
 class State(BaseState):
     """
     状态映射模型 -> 在无限易状态栏查看报单编号的值
     """
     order_id: int | None = Field(default=None, title="报单编号")
 
-class interMultiStrategy(BaseStrategy):
+class myStrategy(BaseStrategy):
     """实盘策略主体
     在编写回调函数时, 回调函数应当按照以下顺序定义, 用不到的回调函数允许不定义
     """
@@ -124,9 +136,15 @@ class interMultiStrategy(BaseStrategy):
         {"AU2501": {"start_date", "end_date", "price", "static_high", "static_low"}
         }
         """
+        self.productList: List[str] = [""]
+        self.kline_generatorDict: Dict[str, KLineGenerator] = {}    # 所有品种的1分钟K线合成器
+        # 确定当日所有需要监控的品种列表(为了节省轮寻时间 -> 只对需要交易的品种进行实时监控)
 
     def on_init(self) -> None:
         print("init")
 
-
+    def on_start(self) -> None:
+        """策略启动的回调函数"""
+        self.reset_state()
+        # 初始K线合成器
 
