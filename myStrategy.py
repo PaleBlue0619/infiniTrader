@@ -14,14 +14,23 @@ def product_formatter(productList: List[str], formatDict: Dict[str, List]) -> Li
     resultList: List[str] = []
     for i in productList:
         formatted_product = str(i).lower()
-        idx = format_product_list.index(str(i).lower())
+        idx = lower_product_list.index(formatted_product)
         resultList.append(format_product_list[idx])
-        # [exchange, strLen] = formatDict[formatted_product]
     return resultList
 
 def contract_formatter(contractList: List[str], formatDict: Dict[str, List]) -> List[str]:
     """把合约代码映射为无限易的代码"""
-    return
+    contractList = [str(i).split(".")[0] for i in contractList] # AU2601.SHF -> AU2601
+    productList = ["".join([j for j in str(i) if str(j).isalpha()]) for i in contractList]
+    timeList = ["".join([j for j in str(i) if str(j).isdigit()]) for i in contractList]
+    productList_format = product_formatter(productList=productList, formatDict=formatDict)
+    integerList = [formatDict[product][-1] for product in productList_format]
+    resultList = []
+    for i in range(0, len(productList_format)):
+        product = productList_format[i]
+        year = timeList[i] if integerList[i] == 4 else timeList[i][1:]
+        resultList.append(str(product)+str(year))
+    return resultList
 
 class Params(BaseParams):
     """参数映射模型 -> 从无限易窗口中传入的参数定义的值
@@ -136,7 +145,7 @@ class myStrategy(BaseStrategy):
         {"AU2501": {"start_date", "end_date", "price", "static_high", "static_low"}
         }
         """
-        self.productList: List[str] = [""]
+        self.productList: List[str] = ["", ""]
         self.kline_generatorDict: Dict[str, KLineGenerator] = {}    # 所有品种的1分钟K线合成器
         # 确定当日所有需要监控的品种列表(为了节省轮寻时间 -> 只对需要交易的品种进行实时监控)
 
