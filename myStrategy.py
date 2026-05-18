@@ -1,5 +1,6 @@
 import os, json, json5
 import dolphindb as ddb
+import pandas as pd
 from typing import Literal, Dict, List
 
 # 从 base 库中导入定义参数和状态映射模型必须的三个方法
@@ -33,34 +34,38 @@ def contract_formatter(contractList: List[str], formatDict: Dict[str, List]) -> 
         resultList.append(str(product)+str(year))
     return resultList
 
-def createOrderTable(session: ddb.session, tableName: str):
+def createOrderTable(session: ddb.session, tableName: str, dropTB: bool = False):
     """DolphinDB 订单流表"""
     colNames = ["exchange","contract","price","orderId","orderSysId",
-                "orderPriceType","direction","offset","cancelTime","orderTime"]
+                "orderPriceType","direction","offset","cancelTime","orderTime","currentTime"]
     colTypes = ["SYMBOL","SYMBOL","DOUBLE","INT","STRING",
-                "INT","INT","INT","TIMESTAMP","TIMESTAMP"]
+                "INT","INT","INT","TIMESTAMP","TIMESTAMP","TIMESTAMP"]
     # orderPriceType 需要 string -> int
     # direction 需要 string -> int
     # cancelTime&orderTime 需要 string -> pd.Timestamp
     session.upload({"colNames":colNames, "colTypes":colTypes})
     session.run(f"""
+    if ({int(dropTB)} == 1){{
         try{{undef("{tableName}", SHARED)}}catch(ex){{}}; // 先删除共享表
-        tab = table(1:0, colNames, colTypes);
-        share(tab, "{tableName}"); // 创建共享内存表
+    }};
+    tab = table(1:0, colNames, colTypes);
+    share(tab, "{tableName}"); // 创建共享内存表
     """)
 
-def createTradeTable(session: ddb.session, tableName: str):
+def createTradeTable(session: ddb.session, tableName: str, dropTB: bool = False):
     """"DolphinDB 交易流表"""
     colNames = ["exchange","contract","tradeId","orderId","orderSysId","tradeTime",
-                "direction","offset","price","volume"]
+                "direction","offset","price","volume","currentTime"]
     colTypes = ["SYMBOL","SYMBOL","INT","INT","INT","TIMESTAMP",
-                "INT","INT","DOUBLE","INT"]
+                "INT","INT","DOUBLE","INT","TIMESTAMP"]
     # direction 需要 string -> int
     session.upload({"colNames": colNames, "colTypes": colTypes})
     session.run(f"""
+    if ({int(dropTB)} == 1){{
         try{{undef("{tableName}", SHARED)}}catch(ex){{}}; // 先删除共享表
-        tab = table(1:0, colNames, colTypes);
-        share(tab, "{tableName}"); // 创建共享内存表
+    }};
+    tab = table(1:0, colNames, colTypes);
+    share(tab, "{tableName}"); // 创建共享内存表
     """)
 
 class Params(BaseParams):
@@ -70,6 +75,7 @@ class Params(BaseParams):
     title: 定义这个参数的中文明 -> 会在PythonGO中显示
     """
     # 这里说白了就是方便单品种时序CTA固定策略, 然后在不更换模板的情况下换品种执行, 如果是多品种CTA策略可以跳过这一步
+
 class State(BaseState):
     """
     状态映射模型 -> 在无限易状态栏查看报单编号的值
@@ -84,10 +90,12 @@ class myStrategy(BaseStrategy):
         super().__init__()
         with open(r"E:\Quant\QuantTrader\infiniTrader\config.json5", "r", encoding="utf-8") as f:
             self.config = json5.load(f)
-        self.session = ddb.session(host=self.config["host"],port=self.config["port"],
-                                userid=self.config["userid"],password=self.config["password"])
-        createTradeTable(session=self.session, tableName=self.config["tradeTable"])
-        createOrderTable(session=self.session, tableName=self.config["orderTable"])
+        self.session = ddb.session(host=self.config["session"]["host"],
+                                   port=self.config["session"]["port"],
+                                   userid=self.config["session"]["userid"],
+                                   password=self.config["session"]["password"])
+        createTradeTable(session=self.session, tableName=self.config["record"]["tradeTable"], dropTB=self.config["record"]["dropTB"])
+        createOrderTable(session=self.session, tableName=self.config["record"]["orderTable"], dropTB=self.config["record"]["dropTB"])
         self.formatDict = {
             "AP": ["CZCE", 3], # 交易所 # 是否省略2
             "CF": ["CZCE", 3],
@@ -178,7 +186,8 @@ class myStrategy(BaseStrategy):
             "zn": ["SHFE", 4]
         }
         self.posDict: Dict[str, Dict[str, any]] = {}    # 前一个交易日收盘时的持仓状态字典
-        self.monitorCont = contract_formatter(contractList=self.config["monitorCont"], formatDict=self.formatDict) # 所有需要被监视的合约列表
+        self.monitorCont = contract_formatter(contractList=self.config["monitorCont"],
+                                              formatDict=self.formatDict) # 所有需要被监视的合约列表
         self.monitorExchange: List[str] = []    # 所有需要被监视的合约列表对应的交易所
         for i in self.monitorCont:
             product = "".join(j for j in i if j.isalpha())
@@ -231,7 +240,9 @@ class myStrategy(BaseStrategy):
         """tick回调函数 -> 用于用户级别开平仓"""
         self.kline_generators[tick.instrument_id].tick_to_kline(tick)
         self.output(tick)
-        self.output(self.kline_containers[tick.instrument_id].get(exchange=tick.exchange,instrument_id=tick.instrument_id,style="1M"))
+        self.output(self.kline_containers[tick.instrument_id].get(exchange=tick.exchange,
+                                                                  instrument_id=tick.instrument_id,
+                                                                  style="1M"))
 
     def on_order(self, order: OrderData) -> None:
         """
@@ -240,7 +251,20 @@ class myStrategy(BaseStrategy):
         """
         super().on_order(order)
         # DolphinDB记录订单信息
-        self.session.run()
+        tableName = self.config["record"]["orderTable"]
+        rowData = [order.exchange,
+                   order.instrument_id,
+                   order.price,
+                   order.order_id,
+                   order.order_sys_id,
+                   int(order.order_price_type),
+                   int(order.direction),  # 买卖方向
+                   int(order.offset),     # 开平仓标志
+                   pd.Timestamp(order.cancel_time),
+                   pd.Timestamp(order.order_time),
+                   pd.Timestamp.now()
+                   ]
+        self.session.run(f"tableInsert{ {tableName} }", rowData)
 
     def on_trade(self, trade: TradeData, log: bool = False) -> None:
         """
@@ -251,7 +275,22 @@ class myStrategy(BaseStrategy):
         # 从报单编号列表中移除对应的报单编号
         if trade.order_id in self.order_id:
             self.order_id.remove(trade.order_id)
+        tableName = self.config["record"]["tradeTime"]
+        rowData = [
+            trade.exchange,
+            trade.instrument_id,
+            trade.trade_id,
+            trade.order_id,
+            trade.order_sys_id,
+            pd.Timestamp(trade.trade_time),
+            int(trade.direction),
+            int(trade.offset),
+            trade.price,
+            trade.volume,
+            pd.Timestamp.now()
+        ]
         # DolphinDB记录成交信息
+        self.session.run(f"tableInsert{ {tableName} }", rowData)
 
     def on_order_cancel(self, order: OrderData) -> None:
         """撤单推送回调"""

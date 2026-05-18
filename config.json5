@@ -5,8 +5,11 @@
     "userid": "admin",
     "password": "123456"
   },
-  "orderTable": "orderTable_realTime",
-  "tradeTable": "tradeTable_realTime",
+  "record": { // 盘中实时行为/状态记录
+    "orderTable": "realTimeOrder",
+    "tradeTable": "realTimeTrade",
+    "dropTB": true
+  },
   "pathStr": "E://Quant//QuantTrader//infiniTrader",
   "monitorCont": ["AG2606.SHF","AP2610.ZCE"]  // 应为今日需要下单的期货合约+当前持仓的期货合约
 }
