@@ -3,13 +3,14 @@ import dolphindb as ddb
 import pandas as pd
 from copy import copy
 from typing import Literal, Dict, List
-from pythongo.classdef.MyPosition import MyPosition
-from pythongo.classdef.MyOrder import MyOrder
+from pythongo.MyPosition import MyPosition
+from pythongo.MyOrder import MyOrder
 # 从 base 库中导入定义参数和状态映射模型必须的三个方法
 from pythongo.base import BaseParams, BaseState, Field, BaseStrategy
 from pythongo.classdef import KLineData, OrderData, TickData, TradeData, Position
 from pythongo.core import KLineStyleType, MarketCenter
 from pythongo.utils import KLineGenerator, KLineContainer
+
 
 def product_formatter(productList: List[str], formatDict: Dict[str, List]) -> List[str]:
     """把品种代码映射为无限易的代码"""
@@ -22,9 +23,10 @@ def product_formatter(productList: List[str], formatDict: Dict[str, List]) -> Li
         resultList.append(format_product_list[idx])
     return resultList
 
+
 def contract_formatter(contractList: List[str], formatDict: Dict[str, List]) -> List[str]:
     """把合约代码映射为无限易的代码"""
-    contractList = [str(i).split(".")[0] for i in contractList] # AU2601.SHF -> AU2601
+    contractList = [str(i).split(".")[0] for i in contractList]  # AU2601.SHF -> AU2601
     productList = ["".join([j for j in str(i) if str(j).isalpha()]) for i in contractList]
     timeList = ["".join([j for j in str(i) if str(j).isdigit()]) for i in contractList]
     productList_format = product_formatter(productList=productList, formatDict=formatDict)
@@ -33,19 +35,20 @@ def contract_formatter(contractList: List[str], formatDict: Dict[str, List]) -> 
     for i in range(0, len(productList_format)):
         product = productList_format[i]
         year = timeList[i] if integerList[i] == 4 else timeList[i][1:]
-        resultList.append(str(product)+str(year))
+        resultList.append(str(product) + str(year))
     return resultList
+
 
 def createOrderTable(session: ddb.session, tableName: str, dropTB: bool = False):
     """DolphinDB 订单流表"""
-    colNames = ["exchange","contract","price","orderId","orderSysId",
-                "orderPriceType","direction","offset","cancelTime","orderTime","currentTime"]
-    colTypes = ["SYMBOL","SYMBOL","DOUBLE","INT","STRING",
-                "INT","INT","INT","TIMESTAMP","TIMESTAMP","TIMESTAMP"]
+    colNames = ["exchange", "contract", "price", "orderId", "orderSysId",
+                "orderPriceType", "direction", "offset", "cancelTime", "orderTime", "currentTime"]
+    colTypes = ["SYMBOL", "SYMBOL", "DOUBLE", "INT", "STRING",
+                "INT", "INT", "INT", "TIMESTAMP", "TIMESTAMP", "TIMESTAMP"]
     # orderPriceType 需要 string -> int
     # direction 需要 string -> int
     # cancelTime&orderTime 需要 string -> pd.Timestamp
-    session.upload({"colNames":colNames, "colTypes":colTypes})
+    session.upload({"colNames": colNames, "colTypes": colTypes})
     session.run(f"""
     if ({int(dropTB)} == 1){{
         try{{undef("{tableName}", SHARED)}}catch(ex){{}}; // 先删除共享表
@@ -54,12 +57,13 @@ def createOrderTable(session: ddb.session, tableName: str, dropTB: bool = False)
     share(tab, "{tableName}"); // 创建共享内存表
     """)
 
+
 def createTradeTable(session: ddb.session, tableName: str, dropTB: bool = False):
     """"DolphinDB 交易流表"""
-    colNames = ["exchange","contract","tradeId","orderId","orderSysId","tradeTime",
-                "direction","offset","price","volume","currentTime"]
-    colTypes = ["SYMBOL","SYMBOL","INT","INT","INT","TIMESTAMP",
-                "INT","INT","DOUBLE","INT","TIMESTAMP"]
+    colNames = ["exchange", "contract", "tradeId", "orderId", "orderSysId", "tradeTime",
+                "direction", "offset", "price", "volume", "currentTime"]
+    colTypes = ["SYMBOL", "SYMBOL", "INT", "INT", "INT", "TIMESTAMP",
+                "INT", "INT", "DOUBLE", "INT", "TIMESTAMP"]
     # direction 需要 string -> int
     session.upload({"colNames": colNames, "colTypes": colTypes})
     session.run(f"""
@@ -70,6 +74,7 @@ def createTradeTable(session: ddb.session, tableName: str, dropTB: bool = False)
     share(tab, "{tableName}"); // 创建共享内存表
     """)
 
+
 class Params(BaseParams):
     """参数映射模型 -> 从无限易窗口中传入的参数定义的值
     Field: 自定义元数据->添加至参数映射模型的字段中
@@ -78,16 +83,19 @@ class Params(BaseParams):
     """
     # 这里说白了就是方便单品种时序CTA固定策略, 然后在不更换模板的情况下换品种执行, 如果是多品种CTA策略可以跳过这一步
 
+
 class State(BaseState):
     """
     状态映射模型 -> 在无限易状态栏查看报单编号的值
     """
     order_id: int | None = Field(default=None, title="报单编号")
 
+
 class MyStrategy(BaseStrategy):
     """实盘策略主体
     在编写回调函数时, 回调函数应当按照以下顺序定义, 用不到的回调函数允许不定义
     """
+
     def __init__(self) -> None:
         super().__init__()
         with open(r"E:\Quant\QuantTrader\infiniTrader\config.json5", "r", encoding="utf-8") as f:
@@ -101,10 +109,12 @@ class MyStrategy(BaseStrategy):
         self.shortPosFile: str = self.config["record"]["shortPos"]
         self.longOrderFile: str = self.config["record"]["longOrder"]
         self.shortOrderFile: str = self.config["record"]["shortOrder"]
-        createTradeTable(session=self.session, tableName=self.config["record"]["tradeTable"], dropTB=self.config["record"]["dropTB"])
-        createOrderTable(session=self.session, tableName=self.config["record"]["orderTable"], dropTB=self.config["record"]["dropTB"])
+        createTradeTable(session=self.session, tableName=self.config["record"]["tradeTable"],
+                         dropTB=self.config["record"]["dropTB"])
+        createOrderTable(session=self.session, tableName=self.config["record"]["orderTable"],
+                         dropTB=self.config["record"]["dropTB"])
         self.formatDict = {
-            "AP": ["CZCE", 3], # 交易所 # 是否省略2
+            "AP": ["CZCE", 3],  # 交易所 # 是否省略2
             "CF": ["CZCE", 3],
             "CJ": ["CZCE", 3],
             "CY": ["CZCE", 3],
@@ -192,19 +202,19 @@ class MyStrategy(BaseStrategy):
             "y": ["DCE", 4],
             "zn": ["SHFE", 4]
         }
-        self.myPosition: MyPosition = MyPosition()    # 上一个交易日收盘时的持仓状态 -> on_start中初始化
-        self.myOrder: MyOrder = MyOrder()   # 上一个交易日收盘时的订单状态 -> on_start中初始化
+        self.myPosition: MyPosition = MyPosition()  # 上一个交易日收盘时的持仓状态 -> on_start中初始化
+        self.myOrder: MyOrder = MyOrder()  # 上一个交易日收盘时的订单状态 -> on_start中初始化
         self.monitorCont = contract_formatter(contractList=self.config["monitorCont"],
                                               formatDict=self.formatDict)
         # 所有需要被监视的合约列表(为了节省轮寻时间 -> 只对需要交易的品种进行实时监控)
-        self.monitorExchange: List[str] = []    # 所有需要被监视的合约列表对应的交易所
+        self.monitorExchange: List[str] = []  # 所有需要被监视的合约列表对应的交易所
         for i in self.monitorCont:
             product = "".join(j for j in i if j.isalpha())
-            self.monitorExchange.append(self.formatDict[product][0])     # 被监视合约对应的交易所信息
-        self.oriPosDict: dict[str, dict[str, dict[str, Position]]] = {}  # 获取当前账号所有持仓
-        self.market_center: MarketCenter = MarketCenter()                     # 行情获取中心
-        self.kline_generators: dict[str, KLineGenerator] = {}    # 所有品种的1分钟K线合成器
-        self.kline_containers: Dict[str, KLineContainer] = {}    # 所有品种的1分钟K线储存器
+            self.monitorExchange.append(self.formatDict[product][0])  # 被监视合约对应的交易所信息
+        self.oriPosDict: Dict[str, Dict[str, Dict[str, Position]]] = {}  # 获取当前账号所有持仓
+        self.market_center: MarketCenter = MarketCenter()  # 行情获取中心
+        self.kline_generators: Dict[str, KLineGenerator] = {}  # 所有品种的1分钟K线合成器
+        self.kline_containers: Dict[str, KLineContainer] = {}  # 所有品种的1分钟K线储存器
 
     def on_start(self) -> None:
         """策略启动的回调函数"""
@@ -216,8 +226,9 @@ class MyStrategy(BaseStrategy):
             os.mkdir(self.pathStr)
 
         # 获取当前所有持仓
-        self.oriPosDict = self.get_position()  # TODO: 调用接口获取当前持仓
+        self.oriPosDict = self.get_all_position()  # TODO: 调用接口获取当前账户所有持仓
         self.output(self.oriPosDict)
+
         # 本地加载Position + Order
         self.myPosition.inputPos(direction="long", savePath=self.pathStr, fileName=self.longPosFile)
         self.myPosition.inputPos(direction="short", savePath=self.pathStr, fileName=self.shortPosFile)
@@ -227,12 +238,12 @@ class MyStrategy(BaseStrategy):
         # 每个合约获取最近1根1分钟K线
         for exchange, contract in zip(self.monitorExchange, self.monitorCont):
             kline_generator = KLineGenerator(
-                real_time_callback=None,
-                callback=None,
+                # real_time_callback=None,
+                callback=self.on_bar,  # bar回调函数
                 exchange=exchange,
                 instrument_id=contract,
                 style="M1"
-            ) # 代表一分钟K线 -> 详见https://infinitrader.quantdo.com.cn/pythongo_v2/modules/pythongo_core#klinestyle
+            )  # 代表一分钟K线 -> 详见https://infinitrader.quantdo.com.cn/pythongo_v2/modules/pythongo_core#klinestyle
             kline_container = KLineContainer(
                 exchange=exchange,
                 instrument_id=contract,
@@ -272,7 +283,7 @@ class MyStrategy(BaseStrategy):
                    order.order_sys_id,
                    int(order.order_price_type),
                    int(order.direction),  # 买卖方向
-                   int(order.offset),     # 开平仓标志
+                   int(order.offset),  # 开平仓标志
                    pd.Timestamp(order.cancel_time),
                    pd.Timestamp(order.order_time),
                    pd.Timestamp.now()
@@ -334,6 +345,7 @@ class MyStrategy(BaseStrategy):
     # 其他回调函数
     def on_bar(self, kline: KLineData) -> None:
         """接受K线回调"""
+        return
 
     def on_bar_realTime(self, kline: KLineData) -> None:
         """接受实时K线回调"""
