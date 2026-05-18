@@ -5,11 +5,15 @@
     "userid": "admin",
     "password": "123456"
   },
-  "record": { // 盘中实时行为/状态记录
+  "record": { // 盘中行为(trade & order-已发送) + 状态(position & order-待发送)记录
     "orderTable": "realTimeOrder",
     "tradeTable": "realTimeTrade",
-    "dropTB": true
+    "dropTB": true,
+    "pathStr": "E://Quant//QuantTrader//infiniTrader",
+    "longPos": "longPos.json5", // 持仓Json5名称
+    "longOrder": "longOrder.json5", // 订单Json5名称
+    "shortPos": "shortPos.json5",
+    "shortOrder": "shortOrder.json5"
   },
-  "pathStr": "E://Quant//QuantTrader//infiniTrader",
   "monitorCont": ["AG2606.SHF","AP2610.ZCE"]  // 应为今日需要下单的期货合约+当前持仓的期货合约
 }

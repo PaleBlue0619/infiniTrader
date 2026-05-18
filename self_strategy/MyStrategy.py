@@ -1,11 +1,13 @@
-import os, json, json5
+import os, sys, json, json5
 import dolphindb as ddb
 import pandas as pd
+from copy import copy
 from typing import Literal, Dict, List
-
+from pythongo.classdef.MyPosition import MyPosition
+from pythongo.classdef.MyOrder import MyOrder
 # 从 base 库中导入定义参数和状态映射模型必须的三个方法
 from pythongo.base import BaseParams, BaseState, Field, BaseStrategy
-from pythongo.classdef import KLineData, OrderData, TickData, TradeData
+from pythongo.classdef import KLineData, OrderData, TickData, TradeData, Position
 from pythongo.core import KLineStyleType, MarketCenter
 from pythongo.utils import KLineGenerator, KLineContainer
 
@@ -82,7 +84,7 @@ class State(BaseState):
     """
     order_id: int | None = Field(default=None, title="报单编号")
 
-class myStrategy(BaseStrategy):
+class MyStrategy(BaseStrategy):
     """实盘策略主体
     在编写回调函数时, 回调函数应当按照以下顺序定义, 用不到的回调函数允许不定义
     """
@@ -94,6 +96,11 @@ class myStrategy(BaseStrategy):
                                    port=self.config["session"]["port"],
                                    userid=self.config["session"]["userid"],
                                    password=self.config["session"]["password"])
+        self.pathStr: str = self.config["record"]["pathStr"]  # 储存持仓信息&订单信息的路径
+        self.longPosFile: str = self.config["record"]["longPos"]
+        self.shortPosFile: str = self.config["record"]["shortPos"]
+        self.longOrderFile: str = self.config["record"]["longOrder"]
+        self.shortOrderFile: str = self.config["record"]["shortOrder"]
         createTradeTable(session=self.session, tableName=self.config["record"]["tradeTable"], dropTB=self.config["record"]["dropTB"])
         createOrderTable(session=self.session, tableName=self.config["record"]["orderTable"], dropTB=self.config["record"]["dropTB"])
         self.formatDict = {
@@ -185,22 +192,19 @@ class myStrategy(BaseStrategy):
             "y": ["DCE", 4],
             "zn": ["SHFE", 4]
         }
-        self.posDict: Dict[str, Dict[str, any]] = {}    # 前一个交易日收盘时的持仓状态字典
+        self.myPosition: MyPosition = MyPosition()    # 上一个交易日收盘时的持仓状态 -> on_start中初始化
+        self.myOrder: MyOrder = MyOrder()   # 上一个交易日收盘时的订单状态 -> on_start中初始化
         self.monitorCont = contract_formatter(contractList=self.config["monitorCont"],
-                                              formatDict=self.formatDict) # 所有需要被监视的合约列表
+                                              formatDict=self.formatDict)
+        # 所有需要被监视的合约列表(为了节省轮寻时间 -> 只对需要交易的品种进行实时监控)
         self.monitorExchange: List[str] = []    # 所有需要被监视的合约列表对应的交易所
         for i in self.monitorCont:
             product = "".join(j for j in i if j.isalpha())
-            self.monitorExchange.append(self.formatDict[product][0])    # 被监视合约对应的交易所信息
-        # TODO: 调用接口获取当前持仓
-        """
-        {"AU2501": {"start_date", "end_date", "price", "static_high", "static_low"}}
-        """
-        self.market_center = MarketCenter()
-        self.kline_containers: Dict[str, KLineContainer] = {}
+            self.monitorExchange.append(self.formatDict[product][0])     # 被监视合约对应的交易所信息
+        self.oriPosDict: dict[str, dict[str, dict[str, Position]]] = {}  # 获取当前账号所有持仓
+        self.market_center: MarketCenter = MarketCenter()                     # 行情获取中心
         self.kline_generators: dict[str, KLineGenerator] = {}    # 所有品种的1分钟K线合成器
-        self.pathStr: str = self.config["pathStr"]
-        # 确定当日所有需要监控的品种列表(为了节省轮寻时间 -> 只对需要交易的品种进行实时监控)
+        self.kline_containers: Dict[str, KLineContainer] = {}    # 所有品种的1分钟K线储存器
 
     def on_start(self) -> None:
         """策略启动的回调函数"""
@@ -210,6 +214,15 @@ class myStrategy(BaseStrategy):
         # 初始化pathStr
         if not os.path.exists(path=self.pathStr):
             os.mkdir(self.pathStr)
+
+        # 获取当前所有持仓
+        self.oriPosDict = self.get_position()  # TODO: 调用接口获取当前持仓
+        self.output(self.oriPosDict)
+        # 本地加载Position + Order
+        self.myPosition.inputPos(direction="long", savePath=self.pathStr, fileName=self.longPosFile)
+        self.myPosition.inputPos(direction="short", savePath=self.pathStr, fileName=self.shortPosFile)
+        self.myOrder.inputOrder(direction="long", savePath=self.pathStr, fileName=self.longOrderFile)
+        self.myOrder.inputOrder(direction="short", savePath=self.pathStr, fileName=self.shortOrderFile)
 
         # 每个合约获取最近1根1分钟K线
         for exchange, contract in zip(self.monitorExchange, self.monitorCont):
@@ -242,7 +255,7 @@ class myStrategy(BaseStrategy):
         self.output(tick)
         self.output(self.kline_containers[tick.instrument_id].get(exchange=tick.exchange,
                                                                   instrument_id=tick.instrument_id,
-                                                                  style="1M"))
+                                                                  style="1M"))  # 如果为空输出为[]
 
     def on_order(self, order: OrderData) -> None:
         """
@@ -275,6 +288,7 @@ class myStrategy(BaseStrategy):
         # 从报单编号列表中移除对应的报单编号
         if trade.order_id in self.order_id:
             self.order_id.remove(trade.order_id)
+        # DolphinDB记录成交信息
         tableName = self.config["record"]["tradeTime"]
         rowData = [
             trade.exchange,
@@ -308,3 +322,19 @@ class myStrategy(BaseStrategy):
                 exchange=exchange,
                 instrument_id=contract
             )
+        # 保存订单信息
+        self.myOrder.outputOrder(direction="long", savePath=self.pathStr, fileName=self.longOrderFile)
+        self.myOrder.outputOrder(direction="short", savePath=self.pathStr, fileName=self.shortOrderFile)
+        self.output("Order 信息保存完毕")
+        # 保存持仓信息
+        self.myPosition.outputPos(direction="long", savePath=self.pathStr, fileName=self.longPosFile)
+        self.myPosition.outputPos(direction="short", savePath=self.pathStr, fileName=self.shortPosFile)
+        self.output("Position 信息保存完毕")
+
+    # 其他回调函数
+    def on_bar(self, kline: KLineData) -> None:
+        """接受K线回调"""
+
+    def on_bar_realTime(self, kline: KLineData) -> None:
+        """接受实时K线回调"""
+        return
