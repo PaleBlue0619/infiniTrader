@@ -1,0 +1,1 @@
+# 注: pythongo与self_strategy文件夹分别对应C:\Users\Admin\AppData\Roaming\InfiniTrader_WxyAllProgramX64\pyStrategy下的对应文件夹的新增/修改文件 -> 基于pythongo源码进行魔改
