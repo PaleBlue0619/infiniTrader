@@ -6,8 +6,8 @@ from typing import List, Dict
 class MyPosition:
     """自定义FIFO仓位管理类"""
     def __init__(self, ):
-        self.longPos: Dict[str, Dict[str, any]] = {}
-        self.shortPos: Dict[str, Dict[str, any]] = {}
+        self.longPos: Dict[str, List[Dict[str, any]]] = {}
+        self.shortPos: Dict[str, List[Dict[str, any]]] = {}
 
     def inputPos(self, direction: str, savePath: str, fileName: str) -> None:
         """从Json5中初始化仓位"""
@@ -15,6 +15,10 @@ class MyPosition:
             return
         with open(rf"{savePath}\{fileName}", "r", encoding="utf-8") as f:
             posDict: Dict[str, List[Dict[str, any]]] = json5.load(f)
+        for symbol, posList in posDict.items():  # 转换为pd.Timestamp
+            for pos in posList:  # 类型转换
+                pos["minPosTime"] = pd.Timestamp(pos["minPosTime"])
+                pos["maxPosTime"] = pd.Timestamp(pos["maxPosTime"])
         for symbol, posList in posDict.items():
             self.setPos(direction=direction, symbol=symbol, posList=posList)
 
@@ -42,19 +46,19 @@ class MyPosition:
             self.longPos[symbol] = posList
             # 类型转换
             for pos in self.longPos[symbol]:
-                pos["posDate"] = pd.Timestamp(pos["posDate"])
-                pos["endDate"] = pd.Timestamp(pos["endDate"])
+                pos["minPosTime"] = pd.Timestamp(pos["minPosTime"])
+                pos["maxPosTime"] = pd.Timestamp(pos["maxPosTime"])
         else:
             self.shortPos[symbol] = posList
             # 类型转换
             for pos in self.shortPos[symbol]:
-                pos["posDate"] = pd.Timestamp(pos["posDate"])
-                pos["endDate"] = pd.Timestamp(pos["endDate"])
+                pos["minPosTime"] = pd.Timestamp(pos["minPosTime"])
+                pos["maxPosTime"] = pd.Timestamp(pos["maxPosTime"])
 
     # 开仓/加仓回调函数
-    def openPos(self, direction: str, symbol: str, price: float, vol: int, posDate: pd.Timestamp, endDate: pd.Timestamp,
+    def openPos(self, direction: str, symbol: str, price: float, vol: int, minPosTime: pd.Timestamp, maxPosTime: pd.Timestamp,
                 staticHigh: float, staticLow: float) -> None:
-        pos = {"price": price, "vol": vol, "posDate": posDate, "endDate": endDate, "staticHigh": staticHigh, "staticLow": staticLow}
+        pos = {"price": price, "vol": vol, "minPosTime": minPosTime, "maxPosTime": maxPosTime, "staticHigh": staticHigh, "staticLow": staticLow}
         if direction == "long":
             if symbol not in self.longPos:
                 self.longPos[symbol] = [pos]
@@ -124,7 +128,7 @@ class MyPosition:
             posDict = self.shortPos.copy()
         for symbol, posList in posDict.items():
             for pos in posList:  # 类型转换
-                pos["posDate"] = pd.Timestamp(pos["posDate"]).strftime("%Y.%m.%d")
-                pos["endDate"] = pd.Timestamp(pos["endDate"]).strftime("%Y.%m.%d")
+                pos["minPosTime"] = pd.Timestamp(pos["minPosTime"]).strftime("%Y.%m.%d %H:%M:%S")
+                pos["maxPosTime"] = pd.Timestamp(pos["maxPosTime"]).strftime("%Y.%m.%d %H:%M:%S")
         with open(rf"{savePath}\{fileName}", "w", encoding="utf-8") as f:
             json5.dump(posDict, f)

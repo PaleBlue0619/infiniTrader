@@ -6,7 +6,8 @@ from copy import copy
 from typing import Literal, Dict, List
 from pythongo.MyPosition import MyPosition
 from pythongo.MyOrder import MyOrder
-from pythongo.MyUtils import createInfoTable, createTradeTable, createOrderTable, contract_formatter, process_marginRate
+from pythongo.MyUtils import createInfoTable, createTradeTable, createOrderTable, \
+    product_formatter, contract_formatter, process_marginRate
 # 从 base 库中导入定义参数和状态映射模型必须的三个方法
 from pythongo.base import BaseParams, BaseState, Field, BaseStrategy
 from pythongo.classdef import KLineData, OrderData, TickData, TradeData, Position
@@ -49,7 +50,7 @@ class MyStrategy(BaseStrategy):
 
     def __init__(self) -> None:
         super().__init__()
-        with open(r"E:\Quant\QuantTrader\infiniTrader\config.json5", "r", encoding="utf-8") as f:
+        with open(r"E:\Quant\QuantTrader\infiniTrader\cons\config.json5", "r", encoding="utf-8") as f:
             self.config = json5.load(f)
         self.session = ddb.session(host=self.config["session"]["host"],
                                    port=self.config["session"]["port"],
@@ -158,24 +159,34 @@ class MyStrategy(BaseStrategy):
                          }
         self.myPosition: MyPosition = MyPosition()  # 上一个交易日收盘时的持仓状态 -> on_start中初始化
         self.myOrder: MyOrder = MyOrder()  # 上一个交易日收盘时的订单状态 -> on_start中初始化
+        # 禁止下单+监控的品种
+        self.deleteProduct: List[str] = self.config["deleteProduct"]
         # 所有需要被监视的合约+交易所(为了节省轮寻时间 -> 只对需要交易的品种进行实时监控)
-        self.monitorCont: List[int] = []
-        self.monitorExchange: List[str] = []
+        self.monitorProduct: List[str] = []     # 可能有重复值
+        self.monitorContract: List[str] = []    # 需要监视的合约
+        self.monitorExchange: List[str] = []    # 对应的交易所代码
         self.oriPosDict: Dict[str, Dict[str, Dict[str, Position]]] = {}  # 获取当前账号所有持仓
         self.market_center: MarketCenter = MarketCenter()  # 行情获取中心
         self.kline_generators: Dict[str, KLineGenerator] = {}  # 所有品种的1分钟K线合成器
         self.kline_containers: Dict[str, KLineContainer] = {}  # 所有品种的1分钟K线储存器
 
-    def get_info(self, monitorCont: List[str] = None) -> pd.DataFrame:
+    def get_info(self, monitorProduct: List[str] = None, deleteProduct: List[str] = None) -> pd.DataFrame:
         """获取品种基本信息
-        TODO: 需要思考备用数据channel -> 万一这个九期网崩了/缺数据怎么办 -> 转tushare futSettle补全数据
+        TODO: 需要思考备用数据channel -> 万一这个交易星球网崩了/缺数据怎么办 -> 转tushare futSettle补全数据
         """
         # 处理外部输入的marginRate数据 + 市场合约数据
         infoDF = process_marginRate(filePath=rf"{self.pathStr}\{self.config['record']['marginFile']}", infoDict=self.infoDict,
                                     savePath=self.pathStr, fileName="marginInfo.csv")
-        if monitorCont:
-            infoDF = infoDF[infoDF["contract"].isin(monitorCont)].reset_index(drop=True)
+        # 交易星球数据不如infiniTrader自身给的主力合约质量高
+        mainContDF = pd.read_excel(rf"{self.pathStr}\{self.config['record']['infiniFile']}",index_col=None, header=0)
+        mainContDict = dict(zip(mainContDF["品种"], mainContDF["合约名称"]))
+        infoDF = infoDF[infoDF["isMainContract"] == 1].reset_index(drop=True)
         infoDF["product"] = infoDF["contract"].apply(lambda x: "".join([str(i) for i in x if str(i).isalpha()]))
+        infoDF["contract"] = infoDF["product"].map(mainContDict)    # 更新主力合约 -> 交易星球的大写字母合约real_html解析会吞掉前面的年份, 但年份无法确定, 保险起见全部用无限易的主力合约
+        if monitorProduct:
+            infoDF = infoDF[infoDF["product"].isin(monitorProduct)].reset_index(drop=True)
+        if deleteProduct:
+            infoDF = infoDF[~infoDF["product"].isin(deleteProduct)].reset_index(drop=True)
         infoDF["exchange"] = infoDF["product"].apply(lambda x: self.infoDict[x]["exchange"])
         infoDF["multi"] = infoDF["product"].apply(lambda x: self.infoDict[x]["multi"])
         infoDF["hasNightTrade"] = infoDF["product"].apply(lambda x: True if self.infoDict[x]["nightTime"] else False)
@@ -209,11 +220,12 @@ class MyStrategy(BaseStrategy):
             infoDF["nightCloseTime"] = infoDF["nightCloseTime"].apply(lambda x:pd.Timestamp({"2300": currentDateStr}.get(x, nextDateStr)+" "+x[:2]+":"+x[2:]+":00") if x else None)
             infoDF["dayOpenTime"] = infoDF["dayOpenTime"].apply(lambda x:pd.Timestamp(nextDateStr+" "+x[:2]+":"+x[2:]+":00") if x else None)
             infoDF["dayCloseTime"] = infoDF["dayCloseTime"].apply(lambda x:pd.Timestamp(nextDateStr+" "+x[:2]+":"+x[2:]+":00") if x else None)
-        infoDF["openTime"] = infoDF.apply(lambda row: row["nightOpenTime"] if row["nightOpenTime"] else row["dayOpenTime"], axis=1)
+        infoDF["openTime"] = infoDF.apply(lambda row: row["nightOpenTime"] if pd.notnull(row["nightOpenTime"]) else row["dayOpenTime"], axis=1)
         infoDF["closeTime"] = infoDF["dayCloseTime"]    # 必定有日盘 -> 收盘即为日盘时间
         infoDF = infoDF[["product","exchange","contract","multi","longMarginRate","shortMarginRate",
                          "hasNightTrade","openTime","closeTime",
-                         "nightOpenTime","nightCloseTime","dayOpenTime","dayCloseTime"]]   # 调整列顺序
+                         "nightOpenTime","nightCloseTime","dayOpenTime","dayCloseTime",
+                         "isMainContract"]]   # 调整列顺序
         return infoDF
 
     def on_start(self) -> None:
@@ -234,21 +246,34 @@ class MyStrategy(BaseStrategy):
         self.myPosition.inputPos(direction="short", savePath=self.pathStr, fileName=self.shortPosFile)
         self.myOrder.inputOrder(direction="long", savePath=self.pathStr, fileName=self.longOrderFile)
         self.myOrder.inputOrder(direction="short", savePath=self.pathStr, fileName=self.shortOrderFile)
-
-        # 决定本次运行所有需要监视的合约 + 交易所
-        self.monitorCont = contract_formatter(contractList=self.config["monitorCont"],
-                                              infoDict=self.infoDict)
-        for i in self.monitorCont:
-            product = "".join(j for j in i if j.isalpha())
-            self.monitorExchange.append(self.infoDict[product]["exchange"])  # 被监视合约对应的交易所信息
+        currentContract = list(set(list(self.myPosition.longPos.keys())+list(self.myPosition.shortPos.keys())))     # 当前持仓合约
+        currentProduct = list(["".join([j for j in i if str(j).isalpha()]) for i in currentContract])   # 当前持仓品种
 
         # 向基本信息表中添加查询后的合约信息
-        contractInfo = self.get_info(monitorCont=None)
+        self.deleteProduct = product_formatter(productList=self.deleteProduct, infoDict=self.infoDict)
+        contractInfo = self.get_info(monitorProduct=None, deleteProduct=self.deleteProduct)
         self.session.upload({"contractInfo": contractInfo})
-        self.session.run(f"""objByName!("{self.infoTable}", true).append!(contractInfo)""")
+        self.session.run(f"""objByName("{self.infoTable}", true).append!(contractInfo)""")
+        self.output("""[INFO] 合约信息保存完毕""")
+
+        # 删除不需要的infoDict
+        for product in self.deleteProduct:
+            if product in self.infoDict:
+                del self.infoDict[product]
+
+        # 更新主力合约至infoDict
+        mainContractInfo = contractInfo[contractInfo["isMainContract"] == 1].reset_index(drop=True)  # 这里isMainContract都是1, 这样写为了方便后续拓展
+        mainContractDict = dict(zip(mainContractInfo["product"], mainContractInfo["contract"]))
+        for product, info in self.infoDict.items():
+            self.infoDict[product]["mainContract"] = mainContractDict[product]
+
+        # 决定本次运行所有需要监视的合约 + 交易所
+        self.monitorProduct = product_formatter(productList=self.config["monitorProduct"] + currentProduct, infoDict=self.infoDict)
+        self.monitorContract = contract_formatter(contractList=currentContract, infoDict=self.infoDict)
+        self.monitorExchange = [self.infoDict[product]["exchange"] for product in self.monitorProduct]
 
         # 每个合约获取最近1根1分钟K线
-        for exchange, contract in zip(self.monitorExchange, self.monitorCont):
+        for exchange, contract in zip(self.monitorExchange, self.monitorContract):
             kline_generator = KLineGenerator(
                 # real_time_callback=None,
                 callback=self.on_bar,  # bar回调函数
@@ -266,7 +291,7 @@ class MyStrategy(BaseStrategy):
             self.kline_containers[contract] = kline_container
 
         # 每个合约订阅行情
-        for exchange, contract in zip(self.monitorExchange, self.monitorCont):
+        for exchange, contract in zip(self.monitorExchange, self.monitorContract):
             self.sub_market_data(
                 exchange=exchange,
                 instrument_id=contract
@@ -340,7 +365,7 @@ class MyStrategy(BaseStrategy):
         super().on_stop()
 
         # 每个合约取消订阅行情
-        for exchange, contract in zip(self.monitorExchange, self.monitorCont):
+        for exchange, contract in zip(self.monitorExchange, self.monitorContract):
             self.unsub_market_data(
                 exchange=exchange,
                 instrument_id=contract
@@ -348,11 +373,11 @@ class MyStrategy(BaseStrategy):
         # 保存订单信息
         self.myOrder.outputOrder(direction="long", savePath=self.pathStr, fileName=self.longOrderFile)
         self.myOrder.outputOrder(direction="short", savePath=self.pathStr, fileName=self.shortOrderFile)
-        self.output("Order 信息保存完毕")
+        self.output("[INFO] Order 状态信息Json5保存完毕")
         # 保存持仓信息
         self.myPosition.outputPos(direction="long", savePath=self.pathStr, fileName=self.longPosFile)
         self.myPosition.outputPos(direction="short", savePath=self.pathStr, fileName=self.shortPosFile)
-        self.output("Position 信息保存完毕")
+        self.output("[INFO] Position 状态信息Json5保存完毕")
 
     # 其他回调函数
     def on_bar(self, kline: KLineData) -> None:
