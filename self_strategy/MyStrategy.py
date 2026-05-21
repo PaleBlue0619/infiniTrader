@@ -1,78 +1,31 @@
 import os, sys, json, json5
 import dolphindb as ddb
 import pandas as pd
+from datetime import datetime
 from copy import copy
 from typing import Literal, Dict, List
 from pythongo.MyPosition import MyPosition
 from pythongo.MyOrder import MyOrder
+from pythongo.MyUtils import createInfoTable, createTradeTable, createOrderTable, contract_formatter, process_marginRate
 # 从 base 库中导入定义参数和状态映射模型必须的三个方法
 from pythongo.base import BaseParams, BaseState, Field, BaseStrategy
 from pythongo.classdef import KLineData, OrderData, TickData, TradeData, Position
 from pythongo.core import KLineStyleType, MarketCenter
 from pythongo.utils import KLineGenerator, KLineContainer
 
-
-def product_formatter(productList: List[str], formatDict: Dict[str, List]) -> List[str]:
-    """把品种代码映射为无限易的代码"""
-    lower_product_list = [str(i).lower() for i in formatDict.keys()]
-    format_product_list = list(formatDict.keys())
-    resultList: List[str] = []
-    for i in productList:
-        formatted_product = str(i).lower()
-        idx = lower_product_list.index(formatted_product)
-        resultList.append(format_product_list[idx])
-    return resultList
-
-
-def contract_formatter(contractList: List[str], formatDict: Dict[str, List]) -> List[str]:
-    """把合约代码映射为无限易的代码"""
-    contractList = [str(i).split(".")[0] for i in contractList]  # AU2601.SHF -> AU2601
-    productList = ["".join([j for j in str(i) if str(j).isalpha()]) for i in contractList]
-    timeList = ["".join([j for j in str(i) if str(j).isdigit()]) for i in contractList]
-    productList_format = product_formatter(productList=productList, formatDict=formatDict)
-    integerList = [formatDict[product][-1] for product in productList_format]
-    resultList = []
-    for i in range(0, len(productList_format)):
-        product = productList_format[i]
-        year = timeList[i] if integerList[i] == 4 else timeList[i][1:]
-        resultList.append(str(product) + str(year))
-    return resultList
-
-
-def createOrderTable(session: ddb.session, tableName: str, dropTB: bool = False):
-    """DolphinDB 订单流表"""
-    colNames = ["exchange", "contract", "price", "orderId", "orderSysId",
-                "orderPriceType", "direction", "offset", "cancelTime", "orderTime", "currentTime"]
-    colTypes = ["SYMBOL", "SYMBOL", "DOUBLE", "INT", "STRING",
-                "INT", "INT", "INT", "TIMESTAMP", "TIMESTAMP", "TIMESTAMP"]
-    # orderPriceType 需要 string -> int
-    # direction 需要 string -> int
-    # cancelTime&orderTime 需要 string -> pd.Timestamp
-    session.upload({"colNames": colNames, "colTypes": colTypes})
-    session.run(f"""
-    if ({int(dropTB)} == 1){{
-        try{{undef("{tableName}", SHARED)}}catch(ex){{}}; // 先删除共享表
-    }};
-    tab = table(1:0, colNames, colTypes);
-    share(tab, "{tableName}"); // 创建共享内存表
-    """)
-
-
-def createTradeTable(session: ddb.session, tableName: str, dropTB: bool = False):
-    """"DolphinDB 交易流表"""
-    colNames = ["exchange", "contract", "tradeId", "orderId", "orderSysId", "tradeTime",
-                "direction", "offset", "price", "volume", "currentTime"]
-    colTypes = ["SYMBOL", "SYMBOL", "INT", "INT", "INT", "TIMESTAMP",
-                "INT", "INT", "DOUBLE", "INT", "TIMESTAMP"]
-    # direction 需要 string -> int
-    session.upload({"colNames": colNames, "colTypes": colTypes})
-    session.run(f"""
-    if ({int(dropTB)} == 1){{
-        try{{undef("{tableName}", SHARED)}}catch(ex){{}}; // 先删除共享表
-    }};
-    tab = table(1:0, colNames, colTypes);
-    share(tab, "{tableName}"); // 创建共享内存表
-    """)
+"""
+交易系统所有功能:
+x: 基本信息(交易时间 + 保证金)写入DolphinDB共享流表 
+0. 盘前录入开仓的期货合约(止盈止损最长持仓时间) + 昨日仓位状态 + 昨日订单状态
+1. 开盘挂单开仓 -> on_tick 
+2. on_order中将订单记录写入DolphinDB共享流表 + 调用MyOrder回调更新内存状态[待测试]
+3. 实时监控持仓 -> on_bar 中平仓
+4. on_trade中将成交记录写入DolphinDB共享流表 + 调用MyPosition回调更新内存状态[待测试]
+5. 离收盘前半小时撤单 + 禁止下单
+6. 策略暂停时/收盘时 -> 自动保存所有订单状态 + 仓位状态
+y: 后续考虑将所有流数据表开启持久化 or 直接用dimensionTable进行代替
+z: TWAP/VWAP进行下单 -> 由于个人交易下单量较小+持仓周期日级别以上, ask1/bid1已经能满足盘口, 所以该需求的优先级不高
+"""
 
 
 class Params(BaseParams):
@@ -83,13 +36,11 @@ class Params(BaseParams):
     """
     # 这里说白了就是方便单品种时序CTA固定策略, 然后在不更换模板的情况下换品种执行, 如果是多品种CTA策略可以跳过这一步
 
-
 class State(BaseState):
     """
     状态映射模型 -> 在无限易状态栏查看报单编号的值
     """
     order_id: int | None = Field(default=None, title="报单编号")
-
 
 class MyStrategy(BaseStrategy):
     """实盘策略主体
@@ -109,112 +60,161 @@ class MyStrategy(BaseStrategy):
         self.shortPosFile: str = self.config["record"]["shortPos"]
         self.longOrderFile: str = self.config["record"]["longOrder"]
         self.shortOrderFile: str = self.config["record"]["shortOrder"]
+        self.infoTable: str = self.config["record"]["infoTable"]
+        createInfoTable(session=self.session, tableName=self.config["record"]["infoTable"],
+                        dropTB=self.config["record"]["dropTB"])
         createTradeTable(session=self.session, tableName=self.config["record"]["tradeTable"],
                          dropTB=self.config["record"]["dropTB"])
         createOrderTable(session=self.session, tableName=self.config["record"]["orderTable"],
                          dropTB=self.config["record"]["dropTB"])
-        self.formatDict = {
-            "AP": ["CZCE", 3],  # 交易所 # 是否省略2
-            "CF": ["CZCE", 3],
-            "CJ": ["CZCE", 3],
-            "CY": ["CZCE", 3],
-            "FG": ["CZCE", 3],
-            "IC": ["CFFEX", 4],
-            "IF": ["CFFEX", 4],
-            "IH": ["CFFEX", 4],
-            "IM": ["CFFEX", 4],
-            "JR": ["CZCE", 3],
-            "MA": ["CZCE", 3],
-            "OI": ["CZCE", 3],
-            "PF": ["CZCE", 3],
-            "PK": ["CZCE", 3],
-            "PL": ["CZCE", 3],
-            "PM": ["CZCE", 3],
-            "PR": ["CZCE", 3],
-            "PX": ["CZCE", 3],
-            "RI": ["CZCE", 3],
-            "RM": ["CZCE", 3],
-            "RS": ["CZCE", 3],
-            "SA": ["CZCE", 3],
-            "SF": ["CZCE", 3],
-            "SH": ["CZCE", 3],
-            "SM": ["CZCE", 3],
-            "SR": ["CZCE", 3],
-            "T": ["CFFEX", 4],
-            "TA": ["CZCE", 3],
-            "TF": ["CFFEX", 4],
-            "TL": ["CFFEX", 4],
-            "TS": ["CFFEX", 4],
-            "UR": ["CZCE", 3],
-            "WH": ["CZCE", 3],
-            "ZC": ["CZCE", 3],
-            "a": ["DCE", 4],
-            "ad": ["SHFE", 4],
-            "ag": ["SHFE", 4],
-            "al": ["SHFE", 4],
-            "ao": ["SHFE", 4],
-            "au": ["SHFE", 4],
-            "b": ["DCE", 4],
-            "bb": ["DCE", 4],
-            "bc": ["INE", 4],
-            "br": ["SHFE", 4],
-            "bu": ["SHFE", 4],
-            "bz": ["DCE", 4],
-            "c": ["DCE", 4],
-            "cs": ["DCE", 4],
-            "cu": ["SHFE", 4],
-            "eb": ["DCE", 4],
-            "ec": ["INE", 4],
-            "eg": ["DCE", 4],
-            "fb": ["DCE", 4],
-            "fu": ["SHFE", 4],
-            "hc": ["SHFE", 4],
-            "i": ["DCE", 4],
-            "j": ["DCE", 4],
-            "jd": ["DCE", 4],
-            "jm": ["DCE", 4],
-            "l": ["DCE", 4],
-            "lc": ["GFFEX", 4],
-            "lg": ["DCE", 4],
-            "lh": ["DCE", 4],
-            "lu": ["INE", 4],
-            "m": ["DCE", 4],
-            "ni": ["SHFE", 4],
-            "nr": ["INE", 4],
-            "op": ["SHFE", 4],
-            "p": ["DCE", 4],
-            "pb": ["SHFE", 4],
-            "pd": ["GFEX", 4],
-            "pg": ["DCE", 4],
-            "pp": ["DCE", 4],
-            "ps": ["GFEX", 4],
-            "pt": ["GFEX", 4],
-            "rb": ["SHFE", 4],
-            "rr": ["DCE", 4],
-            "ru": ["SHFE", 4],
-            "sc": ["INE", 4],
-            "si": ["GFEX", 4],
-            "sn": ["SHFE", 4],
-            "sp": ["SHFE", 4],
-            "ss": ["SHFE", 4],
-            "v": ["DCE", 4],
-            "wr": ["SHFE", 4],
-            "y": ["DCE", 4],
-            "zn": ["SHFE", 4]
-        }
+        # 由于不做股指+国债期货(即CFX交易所的品种), 所以这里直接日盘取连续的就好, 回调中统一处理1015+1130+1330这三个断点
+        self.infoDict = {'AP': {'exchange': 'CZCE', 'multi': 10, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
+                         'CF': {'exchange': 'CZCE', 'multi': 5, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'CJ': {'exchange': 'CZCE', 'multi': 5, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
+                         'CY': {'exchange': 'CZCE', 'multi': 5, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'FG': {'exchange': 'CZCE', 'multi': 20, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'IC': {'exchange': 'CFFEX', 'multi': 200, 'format': 4, 'nightTime': False, 'dayTime': [930, 1500]},
+                         'IF': {'exchange': 'CFFEX', 'multi': 300, 'format': 4, 'nightTime': False, 'dayTime': [930, 1500]},
+                         'IH': {'exchange': 'CFFEX', 'multi': 300, 'format': 4, 'nightTime': False, 'dayTime': [930, 1500]},
+                         'IM': {'exchange': 'CFFEX', 'multi': 200, 'format': 4, 'nightTime': False, 'dayTime': [930, 1500]},
+                         'JR': {'exchange': 'CZCE', 'multi': 20, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
+                         'MA': {'exchange': 'CZCE', 'multi': 10, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'OI': {'exchange': 'CZCE', 'multi': 10, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'PF': {'exchange': 'CZCE', 'multi': 5, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'PK': {'exchange': 'CZCE', 'multi': 5, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
+                         'PL': {'exchange': 'CZCE', 'multi': 20, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'PM': {'exchange': 'CZCE', 'multi': 50, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
+                         'PR': {'exchange': 'CZCE', 'multi': 15, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'PX': {'exchange': 'CZCE', 'multi': 5, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'RI': {'exchange': 'CZCE', 'multi': 20, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
+                         'RM': {'exchange': 'CZCE', 'multi': 10, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'RS': {'exchange': 'CZCE', 'multi': 10, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
+                         'SA': {'exchange': 'CZCE', 'multi': 20, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'SF': {'exchange': 'CZCE', 'multi': 5, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
+                         'SH': {'exchange': 'CZCE', 'multi': 30, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'SM': {'exchange': 'CZCE', 'multi': 5, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
+                         'SR': {'exchange': 'CZCE', 'multi': 10, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'T': {'exchange': 'CFFEX', 'multi': 10000, 'format': 4, 'nightTime': False, 'dayTime': [930, 150]},
+                         'TA': {'exchange': 'CZCE', 'multi': 5, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'TF': {'exchange': 'CFFEX', 'multi': 10000, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
+                         'TL': {'exchange': 'CFFEX', 'multi': 10000, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
+                         'TS': {'exchange': 'CFFEX', 'multi': 20000, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
+                         'UR': {'exchange': 'CZCE', 'multi': 20, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
+                         'WH': {'exchange': 'CZCE', 'multi': 20, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
+                         'ZC': {'exchange': 'CZCE', 'multi': 100, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
+                         'a': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'ad': {'exchange': 'SHFE', 'multi': 10, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]},
+                         'ag': {'exchange': 'SHFE', 'multi': 15, 'format': 4, 'nightTime': [2100, 230], 'dayTime': [900, 1500]},
+                         'al': {'exchange': 'SHFE', 'multi': 5, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]},
+                         'ao': {'exchange': 'SHFE', 'multi': 20, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]},
+                         'au': {'exchange': 'SHFE', 'multi': 1000, 'format': 4, 'nightTime': [2100, 230], 'dayTime': [900, 1500]},
+                         'b': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'bb': {'exchange': 'DCE', 'multi': 500, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
+                         'bc': {'exchange': 'INE', 'multi': 5, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]},
+                         'br': {'exchange': 'SHFE', 'multi': 5, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'bu': {'exchange': 'SHFE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'bz': {'exchange': 'DCE', 'multi': 30, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'c': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'cs': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'cu': {'exchange': 'SHFE', 'multi': 5, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]},
+                         'eb': {'exchange': 'DCE', 'multi': 5, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'ec': {'exchange': 'INE', 'multi': 50, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
+                         'eg': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'fb': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
+                         'fu': {'exchange': 'SHFE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'hc': {'exchange': 'SHFE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'i': {'exchange': 'DCE', 'multi': 100, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'j': {'exchange': 'DCE', 'multi': 100, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'jd': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
+                         'jm': {'exchange': 'DCE', 'multi': 60, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'l': {'exchange': 'DCE', 'multi': 5, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'lc': {'exchange': 'GFFEX', 'multi': 1, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
+                         'lg': {'exchange': 'DCE', 'multi': 90, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
+                         'lh': {'exchange': 'DCE', 'multi': 16, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
+                         'lu': {'exchange': 'INE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'm': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'ni': {'exchange': 'SHFE', 'multi': 1, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]},
+                         'nr': {'exchange': 'INE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'op': {'exchange': 'SHFE', 'multi': 40, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'p': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'pb': {'exchange': 'SHFE', 'multi': 5, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]},
+                         'pd': {'exchange': 'GFEX', 'multi': 1000, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
+                         'pg': {'exchange': 'DCE', 'multi': 20, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'pp': {'exchange': 'DCE', 'multi': 5, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'ps': {'exchange': 'GFEX', 'multi': 3, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
+                         'pt': {'exchange': 'GFEX', 'multi': 1000, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
+                         'rb': {'exchange': 'SHFE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'rr': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'ru': {'exchange': 'SHFE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'sc': {'exchange': 'INE', 'multi': 1000, 'format': 4, 'nightTime': [2100, 230], 'dayTime': [900, 1500]},
+                         'si': {'exchange': 'GFEX', 'multi': 5, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
+                         'sn': {'exchange': 'SHFE', 'multi': 1, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]},
+                         'sp': {'exchange': 'SHFE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'ss': {'exchange': 'SHFE', 'multi': 5, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]},
+                         'v': {'exchange': 'DCE', 'multi': 5, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'wr': {'exchange': 'SHFE', 'multi': 10, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
+                         'y': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+                         'zn': {'exchange': 'SHFE', 'multi': 5, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]}
+                         }
         self.myPosition: MyPosition = MyPosition()  # 上一个交易日收盘时的持仓状态 -> on_start中初始化
         self.myOrder: MyOrder = MyOrder()  # 上一个交易日收盘时的订单状态 -> on_start中初始化
-        self.monitorCont = contract_formatter(contractList=self.config["monitorCont"],
-                                              formatDict=self.formatDict)
-        # 所有需要被监视的合约列表(为了节省轮寻时间 -> 只对需要交易的品种进行实时监控)
-        self.monitorExchange: List[str] = []  # 所有需要被监视的合约列表对应的交易所
-        for i in self.monitorCont:
-            product = "".join(j for j in i if j.isalpha())
-            self.monitorExchange.append(self.formatDict[product][0])  # 被监视合约对应的交易所信息
+        # 所有需要被监视的合约+交易所(为了节省轮寻时间 -> 只对需要交易的品种进行实时监控)
+        self.monitorCont: List[int] = []
+        self.monitorExchange: List[str] = []
         self.oriPosDict: Dict[str, Dict[str, Dict[str, Position]]] = {}  # 获取当前账号所有持仓
         self.market_center: MarketCenter = MarketCenter()  # 行情获取中心
         self.kline_generators: Dict[str, KLineGenerator] = {}  # 所有品种的1分钟K线合成器
         self.kline_containers: Dict[str, KLineContainer] = {}  # 所有品种的1分钟K线储存器
+
+    def get_info(self, monitorCont: List[str] = None) -> pd.DataFrame:
+        """获取品种基本信息
+        TODO: 需要思考备用数据channel -> 万一这个九期网崩了/缺数据怎么办 -> 转tushare futSettle补全数据
+        """
+        # 处理外部输入的marginRate数据 + 市场合约数据
+        infoDF = process_marginRate(filePath=rf"{self.pathStr}\{self.config['record']['marginFile']}", infoDict=self.infoDict,
+                                    savePath=self.pathStr, fileName="marginInfo.csv")
+        if monitorCont:
+            infoDF = infoDF[infoDF["contract"].isin(monitorCont)].reset_index(drop=True)
+        infoDF["product"] = infoDF["contract"].apply(lambda x: "".join([str(i) for i in x if str(i).isalpha()]))
+        infoDF["exchange"] = infoDF["product"].apply(lambda x: self.infoDict[x]["exchange"])
+        infoDF["multi"] = infoDF["product"].apply(lambda x: self.infoDict[x]["multi"])
+        infoDF["hasNightTrade"] = infoDF["product"].apply(lambda x: True if self.infoDict[x]["nightTime"] else False)
+        currentTime = pd.Timestamp.now()
+        currentMinute = int(currentTime.hour * 100 + currentTime.minute)
+        """
+        让我们来仔细想一下如何实现不同时间段启动策略都能看到正确的时间, 因为
+        [0000, 0230] -> 这时候启动策略一定是上一个交易日的延续的夜盘 -> nightOpen: 昨天, nightClose: 今天, dayOpen: 今天, dayClose: 今天
+        [0231, 1500] -> 这时候启动策略一定是今天日盘 -> nightOpen: 今天, nightClose: 今天/明天, dayOpen: 今天, dayClose: 今天 (因为我不做国债期货所以取1500为分界点)
+        [1501, 2359] -> 这时候启动策略一定是今天夜盘 -> nightOpen: 今天, nightClose: 今天/明天, dayOpen: 明天, dayClose: 明天
+        """
+        lastDateStr = pd.Timestamp(pd.Timestamp.now().date() - pd.offsets.BusinessDay(1)).strftime("%Y-%m-%d")  # 2026-05-20
+        currentDateStr = pd.Timestamp.now().date().strftime("%Y-%m-%d")   # 2026-05-21
+        nextDateStr = pd.Timestamp(pd.Timestamp.now().date() + pd.offsets.BusinessDay(1)).strftime("%Y-%m-%d")  # 2026-05-22
+        infoDF["nightOpenTime"] = infoDF["product"].apply(lambda x: str(self.infoDict[x]["nightTime"][0]).zfill(4) if self.infoDict[x]["nightTime"] else None)
+        infoDF["nightCloseTime"] = infoDF["product"].apply(lambda x: str(self.infoDict[x]["nightTime"][1]).zfill(4) if self.infoDict[x]["nightTime"] else None)
+        infoDF["dayOpenTime"] = infoDF["product"].apply(lambda x: str(self.infoDict[x]["dayTime"][0]).zfill(4) if self.infoDict[x]["dayTime"] else None)
+        infoDF["dayCloseTime"] = infoDF["product"].apply(lambda x: str(self.infoDict[x]["dayTime"][1]).zfill(4) if self.infoDict[x]["dayTime"] else None)
+        if currentMinute <= 230:    # 上一个交易日延续的夜盘
+            infoDF["nightOpenTime"] = infoDF["nightOpenTime"].apply(lambda x:pd.Timestamp(lastDateStr+" "+x[:2]+":"+x[2:]+":00") if x else None)
+            infoDF["nightCloseTime"] = infoDF["nightCloseTime"].apply(lambda x:pd.Timestamp(currentDateStr+" "+x[:2]+":"+x[2:]+":00") if x else None)
+            infoDF["dayOpenTime"] = infoDF["dayOpenTime"].apply(lambda x:pd.Timestamp(currentDateStr+" "+x[:2]+":"+x[2:]+":00") if x else None)
+            infoDF["dayCloseTime"] = infoDF["dayCloseTime"].apply(lambda x:pd.Timestamp(currentDateStr+" "+x[:2]+":"+x[2:]+":00") if x else None)
+        elif 231 <= currentMinute <= 1500:  # 今天日盘
+            infoDF["nightOpenTime"] = infoDF["nightOpenTime"].apply(lambda x:pd.Timestamp(currentDateStr+" "+x[:2]+":"+x[2:]+":00") if x else None)
+            infoDF["nightCloseTime"] = infoDF["nightCloseTime"].apply(lambda x:pd.Timestamp({"2300": currentDateStr}.get(x, nextDateStr)+" "+x[:2]+":"+x[2:]+":00") if x else None)
+            infoDF["dayOpenTime"] = infoDF["dayOpenTime"].apply(lambda x:pd.Timestamp(currentDateStr+" "+x[:2]+":"+x[2:]+":00") if x else None)
+            infoDF["dayCloseTime"] = infoDF["dayCloseTime"].apply(lambda x:pd.Timestamp(currentDateStr+" "+x[:2]+":"+x[2:]+":00") if x else None)
+        else:   # 今天夜盘
+            infoDF["nightOpenTime"] = infoDF["nightOpenTime"].apply(lambda x:pd.Timestamp(currentDateStr+" "+x[:2]+":"+x[2:]+":00") if x else None)
+            infoDF["nightCloseTime"] = infoDF["nightCloseTime"].apply(lambda x:pd.Timestamp({"2300": currentDateStr}.get(x, nextDateStr)+" "+x[:2]+":"+x[2:]+":00") if x else None)
+            infoDF["dayOpenTime"] = infoDF["dayOpenTime"].apply(lambda x:pd.Timestamp(nextDateStr+" "+x[:2]+":"+x[2:]+":00") if x else None)
+            infoDF["dayCloseTime"] = infoDF["dayCloseTime"].apply(lambda x:pd.Timestamp(nextDateStr+" "+x[:2]+":"+x[2:]+":00") if x else None)
+        infoDF["openTime"] = infoDF.apply(lambda row: row["nightOpenTime"] if row["nightOpenTime"] else row["dayOpenTime"], axis=1)
+        infoDF["closeTime"] = infoDF["dayCloseTime"]    # 必定有日盘 -> 收盘即为日盘时间
+        infoDF = infoDF[["product","exchange","contract","multi","longMarginRate","shortMarginRate",
+                         "hasNightTrade","openTime","closeTime",
+                         "nightOpenTime","nightCloseTime","dayOpenTime","dayCloseTime"]]   # 调整列顺序
+        return infoDF
 
     def on_start(self) -> None:
         """策略启动的回调函数"""
@@ -234,6 +234,18 @@ class MyStrategy(BaseStrategy):
         self.myPosition.inputPos(direction="short", savePath=self.pathStr, fileName=self.shortPosFile)
         self.myOrder.inputOrder(direction="long", savePath=self.pathStr, fileName=self.longOrderFile)
         self.myOrder.inputOrder(direction="short", savePath=self.pathStr, fileName=self.shortOrderFile)
+
+        # 决定本次运行所有需要监视的合约 + 交易所
+        self.monitorCont = contract_formatter(contractList=self.config["monitorCont"],
+                                              infoDict=self.infoDict)
+        for i in self.monitorCont:
+            product = "".join(j for j in i if j.isalpha())
+            self.monitorExchange.append(self.infoDict[product]["exchange"])  # 被监视合约对应的交易所信息
+
+        # 向基本信息表中添加查询后的合约信息
+        contractInfo = self.get_info(monitorCont=None)
+        self.session.upload({"contractInfo": contractInfo})
+        self.session.run(f"""objByName!("{self.infoTable}", true).append!(contractInfo)""")
 
         # 每个合约获取最近1根1分钟K线
         for exchange, contract in zip(self.monitorExchange, self.monitorCont):

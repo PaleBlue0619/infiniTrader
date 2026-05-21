@@ -5,11 +5,13 @@
     "userid": "admin",
     "password": "123456"
   },
-  "record": { // 盘中行为(trade & order-已发送) + 状态(position & order-待发送)记录
+  "record": { // 合约基本信息(盘前集中获取) + 盘中行为(trade & order-已发送) + 状态(position & order-待发送)记录
+    "infoTable": "realTimeInfo",
     "orderTable": "realTimeOrder",
     "tradeTable": "realTimeTrade",
     "dropTB": true,
     "pathStr": "E://Quant//QuantTrader//infiniTrader",
+    "marginFile": "0521.xls",
     "longPos": "longPos.json5", // 持仓Json5名称
     "longOrder": "longOrder.json5", // 订单Json5名称
     "shortPos": "shortPos.json5",
