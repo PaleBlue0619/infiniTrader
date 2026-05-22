@@ -18,6 +18,18 @@
     "shortPos": "shortPos.json5",
     "shortOrder": "shortOrder.json5"
   },
+  "signalFile": "E://Quant//PyBackTest//test//futStrategy//realTimeSignal.csv",
+  /*
+  强制包含:
+  product: 品种名称
+  symbol: 合约名称
+  direction: 交易方向
+  amount: 给这个合约+方向的资金总额
+  minPosTimestamp: 最短持仓时间
+  maxPosTimestamp: 最长持仓时间
+  profitLimit: 止盈比例
+  lossLimit: 止损比例
+  */
   "monitorProduct": ["AG","AU"],  // 应为今日需要下单的期货合约+当前持仓的期货合约(这里不填也行, 会自动识别, 填是为了防止文件丢失)
   "deleteProduct": ["JR","RI","PM","WH","ZC"] // 剔除奇奇怪怪的无法交易的品种(但无限易里面好像还有)
 }
