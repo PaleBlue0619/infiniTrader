@@ -64,20 +64,29 @@ class Event:    # 基本动作 -> 开/平 * 多/空 * 手数 * * 最短/最长�
         self.maxOrderTimestamp = maxOrderTimeStamp
 
 class MyBrain(MyPosition, MyOrder):
-    def __init__(self, longPosPath: str, longPosFile: str, shortPosPath: str, shortPosFile: str,
-                 longOrderPath: str, longOrderFile: str, shortOrderPath: str, shortOrderFile: str):
+    def __init__(self):
         super(MyBrain, self).__init__()
         # Python中的字典是有序的
         self.eventIdx: int = 0  # 策略重启后eventIdx重新从0开始
         self.eventWait: Dict[Event] = []    # 待执行event
         self.eventDoing: Dict[Event] = []    # 已执行event
         # 初始化MyOrder & MyPosition 对象
-        self.Order: Myorder = MyOrder()
+        self.Order: MyOrder = MyOrder()
         self.Position: MyPosition = MyPosition()
-        self.Position.inputPos(direction="long", savePath=longPosPath, fileName=longPosFile)
-        self.Position.inputPos(direction="short", savePath=shortPosPath, fileName=shortPosFile)
-        self.Order.inputOrder(direction="long", savePath=longOrderPath, fileName=longOrderFile)
-        self.Order.inputOrder(direction="short", savePath=shortOrderPath, fileName=shortOrderFile)
+
+    def init(self, pathStr: str, longPosFile: str, shortPosFile: str, longOrderFile: str, shortOrderFile: str):
+        """MyBrain实例中的Order & Position实例初始化"""
+        self.Position.inputPos(direction="long", savePath=pathStr, fileName=longPosFile)
+        self.Position.inputPos(direction="short", savePath=pathStr, fileName=shortPosFile)
+        self.Order.inputOrder(direction="long", savePath=pathStr, fileName=longOrderFile)
+        self.Order.inputOrder(direction="short", savePath=pathStr, fileName=shortOrderFile)
+
+    def save(self, pathStr: str, longPosFile: str, shortPosFile: str, longOrderFile: str, shortOrderFile: str):
+        """MyBrain实例中的Order & Position实例保存至本地"""
+        self.Position.inputPos(direction="long", savePath=pathStr, fileName=longPosFile)
+        self.Position.inputPos(direction="short", savePath=pathStr, fileName=shortPosFile)
+        self.Order.inputOrder(direction="long", savePath=pathStr, fileName=longOrderFile)
+        self.Order.inputOrder(direction="short", savePath=pathStr, fileName=shortOrderFile)
 
     def addOpenEvent(self, data: pd.DataFrame, info: pd.DataFrame):
         """

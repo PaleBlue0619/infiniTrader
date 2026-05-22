@@ -6,6 +6,7 @@ from copy import copy
 from typing import Literal, Dict, List
 from pythongo.MyPosition import MyPosition
 from pythongo.MyOrder import MyOrder
+from pythongo.MyBrain import MyBrain
 from pythongo.MyUtils import createInfoTable, createTradeTable, createOrderTable, \
     product_formatter, contract_formatter, process_marginRate
 # 从 base 库中导入定义参数和状态映射模型必须的三个方法
@@ -27,6 +28,7 @@ x: 基本信息(交易时间 + 保证金)写入DolphinDB共享流表
 y: 后续考虑将所有流数据表开启持久化 or 直接用dimensionTable进行代替
 z: TWAP/VWAP进行下单 -> 由于个人交易下单量较小+持仓周期日级别以上, ask1/bid1已经能满足盘口, 所以该需求的优先级不高
 """
+
 
 class Params(BaseParams):
     """参数映射模型 -> 从无限易窗口中传入的参数定义的值
@@ -60,6 +62,7 @@ class MyStrategy(BaseStrategy):
         self.shortPosFile: str = self.config["record"]["shortPos"]
         self.longOrderFile: str = self.config["record"]["longOrder"]
         self.shortOrderFile: str = self.config["record"]["shortOrder"]
+        self.signalFile: str = self.config["signalFile"]
         self.infoTable: str = self.config["record"]["infoTable"]
         createInfoTable(session=self.session, tableName=self.config["record"]["infoTable"],
                         dropTB=self.config["record"]["dropTB"])
@@ -156,8 +159,9 @@ class MyStrategy(BaseStrategy):
                          'y': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
                          'zn': {'exchange': 'SHFE', 'multi': 5, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]}
                          }
-        self.myPosition: MyPosition = MyPosition()  # 上一个交易日收盘时的持仓状态 -> on_start中初始化
-        self.myOrder: MyOrder = MyOrder()  # 上一个交易日收盘时的订单状态 -> on_start中初始化
+        self.myBrain: MyBrain = MyBrain()   # 策略大脑 -> 管理Position + Order -> on_start中初始化
+        # self.myPosition: MyPosition = MyPosition()  # 上一个交易日收盘时的持仓状态 -> on_start中初始化
+        # self.myOrder: MyOrder = MyOrder()  # 上一个交易日收盘时的订单状态 -> on_start中初始化
         # 禁止下单+监控的品种
         self.deleteProduct: List[str] = self.config["deleteProduct"]
         # 所有需要被监视的合约+交易所(为了节省轮寻时间 -> 只对需要交易的品种进行实时监控)
@@ -240,11 +244,13 @@ class MyStrategy(BaseStrategy):
         self.oriPosDict = self.get_all_position()  # TODO: 调用接口获取当前账户所有持仓
         self.output(self.oriPosDict)
 
-        # 本地加载Position + Order
-        self.myPosition.inputPos(direction="long", savePath=self.pathStr, fileName=self.longPosFile)
-        self.myPosition.inputPos(direction="short", savePath=self.pathStr, fileName=self.shortPosFile)
-        self.myOrder.inputOrder(direction="long", savePath=self.pathStr, fileName=self.longOrderFile)
-        self.myOrder.inputOrder(direction="short", savePath=self.pathStr, fileName=self.shortOrderFile)
+        # 本地加载Position + Order -> MyBrain初始化
+        self.myBrain.init(pathStr=self.pathStr, longPosFile=self.longPosFile, shortPosFile=self.shortPosFile,
+                          longOrderFile=self.longOrderFile, shortOrderFile=self.shortOrderFile)
+        # self.myPosition.inputPos(direction="long", savePath=self.pathStr, fileName=self.longPosFile)
+        # self.myPosition.inputPos(direction="short", savePath=self.pathStr, fileName=self.shortPosFile)
+        # self.myOrder.inputOrder(direction="long", savePath=self.pathStr, fileName=self.longOrderFile)
+        # self.myOrder.inputOrder(direction="short", savePath=self.pathStr, fileName=self.shortOrderFile)
         currentContract = list(set(list(self.myPosition.longPos.keys())+list(self.myPosition.shortPos.keys())))     # 当前持仓合约
         currentProduct = list(["".join([j for j in i if str(j).isalpha()]) for i in currentContract])   # 当前持仓品种
 
@@ -253,12 +259,21 @@ class MyStrategy(BaseStrategy):
         contractInfo = self.get_info(monitorProduct=None, deleteProduct=self.deleteProduct)
         self.session.upload({"contractInfo": contractInfo})
         self.session.run(f"""objByName("{self.infoTable}", true).append!(contractInfo)""")
-        self.output("""[INFO] 合约信息保存完毕""")
+        self.output("""[INFO] 合约信息加载完毕""")
 
         # 删除不需要的infoDict
         for product in self.deleteProduct:
             if product in self.infoDict:
                 del self.infoDict[product]
+
+        # 本地加载开仓信号 + 规范品种&合约名称 -> 没有则跳过
+        openSignal = pd.read_csv(self.signalFile, index_col=None, header=0).rename(columns={"contract": "symbol"})
+        openSignal["product"] = product_formatter(productList=list(openSignal["product"]), infoDict=self.infoDict)
+        openSignal["symbol"] = contract_formatter(contractList=list(openSignal["symbol"]), infoDict=self.infoDict)
+        infoDF = self.session.run(f"""select * from objByName("{self.infoTable}", true)""")   # DolphinDB共享流表(品种信息)
+        openSignal = openSignal[~openSignal["product"].isin(self.deleteProduct)].reset_index(drop=True)  # 剔除黑名单品种
+        self.myBrain.addOpenEvent(data=openSignal, info=infoDF)
+        self.output("""[INFO] 本地加载信号完毕""")
 
         # 更新主力合约至infoDict
         mainContractInfo = contractInfo[contractInfo["isMainContract"] == 1].reset_index(drop=True)  # 这里isMainContract都是1, 这样写为了方便后续拓展
@@ -270,6 +285,7 @@ class MyStrategy(BaseStrategy):
         self.monitorProduct = product_formatter(productList=self.config["monitorProduct"] + currentProduct, infoDict=self.infoDict)
         self.monitorContract = contract_formatter(contractList=currentContract, infoDict=self.infoDict)
         self.monitorExchange = [self.infoDict[product]["exchange"] for product in self.monitorProduct]
+        self.output(f"[INFO] 监控合约: {self.monitorContract}")
 
         # 每个合约获取最近1根1分钟K线
         for exchange, contract in zip(self.monitorExchange, self.monitorContract):
@@ -369,13 +385,14 @@ class MyStrategy(BaseStrategy):
                 exchange=exchange,
                 instrument_id=contract
             )
-        # 保存订单信息
-        self.myOrder.outputOrder(direction="long", savePath=self.pathStr, fileName=self.longOrderFile)
-        self.myOrder.outputOrder(direction="short", savePath=self.pathStr, fileName=self.shortOrderFile)
+        # 保存订单信息 & 保存持仓信息
+        self.myBrain.save(pathStr=self.pathStr, longPosFile=self.longPosFile, shortPosFile=self.shortPosFile,
+                          longOrderFile=self.longOrderFile, shortOrderFile=self.shortOrderFile)
+        # self.myOrder.outputOrder(direction="long", savePath=self.pathStr, fileName=self.longOrderFile)
+        # self.myOrder.outputOrder(direction="short", savePath=self.pathStr, fileName=self.shortOrderFile)
+        # self.myPosition.outputPos(direction="long", savePath=self.pathStr, fileName=self.longPosFile)
+        # self.myPosition.outputPos(direction="short", savePath=self.pathStr, fileName=self.shortPosFile)
         self.output("[INFO] Order 状态信息Json5保存完毕")
-        # 保存持仓信息
-        self.myPosition.outputPos(direction="long", savePath=self.pathStr, fileName=self.longPosFile)
-        self.myPosition.outputPos(direction="short", savePath=self.pathStr, fileName=self.shortPosFile)
         self.output("[INFO] Position 状态信息Json5保存完毕")
 
     # 其他回调函数
