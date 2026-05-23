@@ -17,14 +17,14 @@ from pythongo.utils import KLineGenerator, KLineContainer
 
 """
 交易系统所有功能:
-x: 基本信息(交易时间 + 保证金)写入DolphinDB共享流表 
-0. 盘前录入开仓的期货合约(止盈止损最长持仓时间) + 昨日仓位状态 + 昨日订单状态
+x: 基本信息(交易时间 + 保证金)写入DolphinDB共享流表 [待测试]
+0. 盘前录入开仓的期货合约(止盈止损最长持仓时间) + 昨日仓位状态 + 昨日订单状态 [待测试]
 1. 开盘挂单开仓 -> on_tick 
-2. on_order中将订单记录写入DolphinDB共享流表 + 调用MyOrder回调更新内存状态[待测试]
+2. on_order中将订单记录写入DolphinDB共享流表 + 调用MyOrder回调更新内存状态 [待测试]
 3. 实时监控持仓 -> on_bar 中平仓
-4. on_trade中将成交记录写入DolphinDB共享流表 + 调用MyPosition回调更新内存状态[待测试]
+4. on_trade中将成交记录写入DolphinDB共享流表 + 调用MyPosition回调更新内存状态 [待测试]
 5. 离收盘前半小时撤单 + 禁止下单
-6. 策略暂停时/收盘时 -> 自动保存所有订单状态 + 仓位状态
+6. 策略暂停时/收盘时 -> 自动保存所有订单状态 + 仓位状态 [待测试]
 y: 后续考虑将所有流数据表开启持久化 or 直接用dimensionTable进行代替
 z: TWAP/VWAP进行下单 -> 由于个人交易下单量较小+持仓周期日级别以上, ask1/bid1已经能满足盘口, 所以该需求的优先级不高
 """
@@ -251,7 +251,7 @@ class MyStrategy(BaseStrategy):
         # self.myPosition.inputPos(direction="short", savePath=self.pathStr, fileName=self.shortPosFile)
         # self.myOrder.inputOrder(direction="long", savePath=self.pathStr, fileName=self.longOrderFile)
         # self.myOrder.inputOrder(direction="short", savePath=self.pathStr, fileName=self.shortOrderFile)
-        currentContract = list(set(list(self.myPosition.longPos.keys())+list(self.myPosition.shortPos.keys())))     # 当前持仓合约
+        currentContract = list(set(list(self.myBrain.Position.longPos.keys())+list(self.myBrain.Position.shortPos.keys())))     # 当前持仓合约
         currentProduct = list(["".join([j for j in i if str(j).isalpha()]) for i in currentContract])   # 当前持仓品种
 
         # 向基本信息表中添加查询后的合约信息
@@ -272,7 +272,7 @@ class MyStrategy(BaseStrategy):
         openSignal["symbol"] = contract_formatter(contractList=list(openSignal["symbol"]), infoDict=self.infoDict)
         infoDF = self.session.run(f"""select * from objByName("{self.infoTable}", true)""")   # DolphinDB共享流表(品种信息)
         openSignal = openSignal[~openSignal["product"].isin(self.deleteProduct)].reset_index(drop=True)  # 剔除黑名单品种
-        self.myBrain.addOpenEvent(data=openSignal, info=infoDF)
+        self.myBrain.addOpenEvents(data=openSignal, info=infoDF)
         self.output("""[INFO] 本地加载信号完毕""")
 
         # 更新主力合约至infoDict

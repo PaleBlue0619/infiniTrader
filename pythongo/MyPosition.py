@@ -1,7 +1,7 @@
 import os, json, json5
 import pandas as pd
 from copy import copy
-from typing import List, Dict
+from typing import List, Dict, Literal
 
 class MyPosition:
     """自定义FIFO仓位管理类"""
@@ -85,14 +85,18 @@ class MyPosition:
                 else:
                     del self.shortPos[symbol][:endIdx]
 
-    def closePos(self, direction: str, symbol: str, vol: int) -> None:
-        """平仓 & 部分平仓函数"""
+    def closePos(self, direction: str, symbol: str, vol: int) -> Literal[0, 1]:
+        """平仓 & 部分平仓函数
+        0: 完全平仓
+        1: 部分平仓
+        """
         if direction == "long":
             if symbol in self.longPos:
                 volList: List[int] = [pos["vol"] for pos in self.longPos[symbol]]
                 totalVol: int = sum(volList)    # 统计当前总持仓量
                 if vol >= totalVol:   # 说明全部平仓
                     self.delPos(direction=direction, symbol=symbol, endIdx=None)
+                    return 1
                 else:
                     for v in volList:
                         if v > vol:   # 说明已经平到了指定的仓位
@@ -101,12 +105,14 @@ class MyPosition:
                         else:   # v<=vol -> 还需要继续往下平
                             self.delPos(direction=direction, symbol=symbol, endIdx=1)    # 平掉第1-1=0个(也就是最前面)的仓位
                             vol -= v
+                    return 0
         else:
             if symbol in self.shortPos:
                 volList: List[int] = [pos["vol"] for pos in self.shortPos[symbol]]
                 totalVol: int = sum(volList)    # 统计当前总持仓量
                 if vol >= totalVol:   # 说明全部平仓
                     self.delPos(direction=direction, symbol=symbol, endIdx=None)
+                    return 1
                 else:
                     for v in volList:
                         if v > vol:   # 说明已经平到了指定的仓位
@@ -115,6 +121,7 @@ class MyPosition:
                         else:   # v<=vol -> 还需要继续往下平
                             self.delPos(direction=direction, symbol=symbol, endIdx=1)
                             vol -= vol
+                    return 0
 
     def copy(self) -> "MyPosition":
         """浅拷贝自身"""

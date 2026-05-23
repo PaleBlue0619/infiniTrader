@@ -24,6 +24,7 @@
   product: 品种名称
   symbol: 合约名称
   direction: 交易方向
+  price: 合约最新价 -> 用于计算 vol & volume
   amount: 给这个合约+方向的资金总额
   minPosTimestamp: 最短持仓时间
   maxPosTimestamp: 最长持仓时间
