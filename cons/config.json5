@@ -13,10 +13,9 @@
     "pathStr": "E://Quant//QuantTrader//infiniTrader//cons",
     "marginFile": "0522.xls", // from 交易星球保证金数据: https://www.jiaoyixingqiu.com/shouxufei/all
     "infiniFile": "infiniTrader.xlsx", // 无限易主力合约实时更新excel
-    "longPos": "longPos.json5", // 持仓Json5名称
-    "longOrder": "longOrder.json5", // 订单Json5名称
-    "shortPos": "shortPos.json5",
-    "shortOrder": "shortOrder.json5"
+    "longPosFile": "longPos.json5", // 持仓Json5名称
+    "shortPosFile": "shortPos.json5",
+    "orderFile": "order.json5"
   },
   "signalFile": "E://Quant//PyBackTest//test//futStrategy//realTimeSignal.csv",
   /*
@@ -28,9 +27,8 @@
   amount: 给这个合约+方向的资金总额
   minPosTimestamp: 最短持仓时间
   maxPosTimestamp: 最长持仓时间
-  profitLimit: 止盈比例
-  lossLimit: 止损比例
+  upLimit: 多单止盈+空单止损比例
+  downLimit: 多单止损+空单止盈比例
   */
-  "monitorProduct": ["AG","AU"],  // 应为今日需要下单的期货合约+当前持仓的期货合约(这里不填也行, 会自动识别, 填是为了防止文件丢失)
   "deleteProduct": ["JR","RI","PM","WH","ZC"] // 剔除奇奇怪怪的无法交易的品种(但无限易里面好像还有)
 }

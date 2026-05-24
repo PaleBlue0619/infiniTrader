@@ -17,8 +17,8 @@ class MyPosition:
             posDict: Dict[str, List[Dict[str, any]]] = json5.load(f)
         for symbol, posList in posDict.items():  # 转换为pd.Timestamp
             for pos in posList:  # 类型转换
-                pos["minPosTime"] = pd.Timestamp(pos["minPosTime"])
-                pos["maxPosTime"] = pd.Timestamp(pos["maxPosTime"])
+                pos["minPosTime"] = pd.Timestamp(pos["minPosTime"]) if pos["minPosTime"] else None
+                pos["maxPosTime"] = pd.Timestamp(pos["maxPosTime"]) if pos["maxPosTime"] else None
         for symbol, posList in posDict.items():
             self.setPos(direction=direction, symbol=symbol, posList=posList)
 
@@ -135,7 +135,7 @@ class MyPosition:
             posDict = self.shortPos.copy()
         for symbol, posList in posDict.items():
             for pos in posList:  # 类型转换
-                pos["minPosTime"] = pd.Timestamp(pos["minPosTime"]).strftime("%Y.%m.%d %H:%M:%S")
-                pos["maxPosTime"] = pd.Timestamp(pos["maxPosTime"]).strftime("%Y.%m.%d %H:%M:%S")
+                pos["minPosTime"] = pd.Timestamp(pos["minPosTime"]).strftime("%Y.%m.%d %H:%M:%S") if pos["minPosTime"] else None
+                pos["maxPosTime"] = pd.Timestamp(pos["maxPosTime"]).strftime("%Y.%m.%d %H:%M:%S") if pos["maxPosTime"] else None
         with open(rf"{savePath}\{fileName}", "w", encoding="utf-8") as f:
             json5.dump(posDict, f)
