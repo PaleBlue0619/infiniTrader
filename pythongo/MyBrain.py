@@ -172,14 +172,14 @@ class MyBrain(MyPosition, MyOrder):
         info: 合约信息(from DolphinDB流表)
         """
         # Step2. 今日开仓计划
-        info = info[["contract", "product", "multi", "longMarginRate", "shortMarginRate",
+        info_ = info[["contract", "product", "multi", "longMarginRate", "shortMarginRate",
                      "hasNightTrade", "openTime", "closeTime"]].rename(
             columns={"contract": "symbol"}
         )
-        data = data[["symbol","direction","product", "minOrderTimestamp", "maxOrderTimestamp",
+        data_ = data[["symbol","direction","product", "minOrderTimestamp", "maxOrderTimestamp",
                      "minPosTimestamp", "maxPosTimestamp", "amount","price","upLimit","downLimit"]]   # 这里的price是最新价 -> 用于计算vol&volume
-        data = pd.merge(data, info, how="left", on=["symbol","product"])
-        for _, row in data.iterrows():         # 每一行->开仓事件
+        data_ = pd.merge(data_, info_, how="left", on=["symbol","product"])
+        for _, row in data_.iterrows():         # 每一行->开仓事件
             marginRate = row["longMarginRate"] if row["direction"] == "long" else row["shortMarginRate"]
             # 计算vol(手数)以及volume(交易乘数)
             volume = int((row["amount"] / marginRate) / row["price"])
@@ -238,6 +238,13 @@ class MyBrain(MyPosition, MyOrder):
         else:
             self.eventDoing[oriEventIdx].delete = True
         # 总之无事发生->仍在eventDoing队列中
+        event = self.eventDoing[oriEventIdx]
+        stateStr = "open" if int(offset) == 0 else "close"
+        self.Order.openOrder(orderidx=int(memo), state=stateStr, symbol=symbol, vol=totalVol,
+                             price=self.eventDoing[oriEventIdx].price, direction=direction,
+                             minOrderTime=event.minTimestamp, maxOrderTime=event.maxTimestamp,
+                             minPosTime=event.minPosTimestamp, maxPosTime=event.maxPosTimestamp,
+                             upLimit=event.upLimit, downLimit=event.downLimit)
         return
 
     def onTrade(self, currentTime: pd.Timestamp, symbol: str, direction: str, offset: int, vol: int, price: float, memo: str) -> None:

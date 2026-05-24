@@ -73,9 +73,9 @@ def createOrderTable(session: ddb.session, tableName: str, dropTB: bool = False)
 def createTradeTable(session: ddb.session, tableName: str, dropTB: bool = False):
     """"DolphinDB 交易流表"""
     colNames = ["exchange", "contract", "tradeId", "orderId", "orderSysId", "tradeTime",
-                "direction", "offset", "price", "volume", "memo", "currentTime"]
+                "direction", "offset", "price", "volume", "status", "memo", "currentTime"]
     colTypes = ["SYMBOL", "SYMBOL", "INT", "INT", "INT", "TIMESTAMP",
-                "INT", "INT", "DOUBLE", "INT", "STRING", "TIMESTAMP"]
+                "INT", "INT", "DOUBLE", "INT", "STRING", "STRING", "TIMESTAMP"]
     # direction 需要 string -> int
     session.upload({"colNames": colNames, "colTypes": colTypes})
     session.run(f"""

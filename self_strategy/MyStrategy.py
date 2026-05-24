@@ -38,11 +38,13 @@ class Params(BaseParams):
     """
     # 这里说白了就是方便单品种时序CTA固定策略, 然后在不更换模板的情况下换品种执行, 如果是多品种CTA策略可以跳过这一步
 
+
 class State(BaseState):
     """
     状态映射模型 -> 在无限易状态栏查看报单编号的值
     """
     order_id: int | None = Field(default=None, title="报单编号")
+
 
 class MyStrategy(BaseStrategy):
     """实盘策略主体
@@ -70,101 +72,102 @@ class MyStrategy(BaseStrategy):
         createOrderTable(session=self.session, tableName=self.config["record"]["orderTable"],
                          dropTB=self.config["record"]["dropTB"])
         # 由于不做股指+国债期货(即CFX交易所的品种), 所以这里直接日盘取连续的就好, 回调中统一处理1015+1130+1330这三个断点
-        self.infoDict = {'AP': {'exchange': 'CZCE', 'multi': 10, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
-                         'CF': {'exchange': 'CZCE', 'multi': 5, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'CJ': {'exchange': 'CZCE', 'multi': 5, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
-                         'CY': {'exchange': 'CZCE', 'multi': 5, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'FG': {'exchange': 'CZCE', 'multi': 20, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'IC': {'exchange': 'CFFEX', 'multi': 200, 'format': 4, 'nightTime': False, 'dayTime': [930, 1500]},
-                         'IF': {'exchange': 'CFFEX', 'multi': 300, 'format': 4, 'nightTime': False, 'dayTime': [930, 1500]},
-                         'IH': {'exchange': 'CFFEX', 'multi': 300, 'format': 4, 'nightTime': False, 'dayTime': [930, 1500]},
-                         'IM': {'exchange': 'CFFEX', 'multi': 200, 'format': 4, 'nightTime': False, 'dayTime': [930, 1500]},
-                         'JR': {'exchange': 'CZCE', 'multi': 20, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
-                         'MA': {'exchange': 'CZCE', 'multi': 10, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'OI': {'exchange': 'CZCE', 'multi': 10, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'PF': {'exchange': 'CZCE', 'multi': 5, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'PK': {'exchange': 'CZCE', 'multi': 5, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
-                         'PL': {'exchange': 'CZCE', 'multi': 20, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'PM': {'exchange': 'CZCE', 'multi': 50, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
-                         'PR': {'exchange': 'CZCE', 'multi': 15, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'PX': {'exchange': 'CZCE', 'multi': 5, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'RI': {'exchange': 'CZCE', 'multi': 20, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
-                         'RM': {'exchange': 'CZCE', 'multi': 10, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'RS': {'exchange': 'CZCE', 'multi': 10, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
-                         'SA': {'exchange': 'CZCE', 'multi': 20, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'SF': {'exchange': 'CZCE', 'multi': 5, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
-                         'SH': {'exchange': 'CZCE', 'multi': 30, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'SM': {'exchange': 'CZCE', 'multi': 5, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
-                         'SR': {'exchange': 'CZCE', 'multi': 10, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'T': {'exchange': 'CFFEX', 'multi': 10000, 'format': 4, 'nightTime': False, 'dayTime': [930, 150]},
-                         'TA': {'exchange': 'CZCE', 'multi': 5, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'TF': {'exchange': 'CFFEX', 'multi': 10000, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
-                         'TL': {'exchange': 'CFFEX', 'multi': 10000, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
-                         'TS': {'exchange': 'CFFEX', 'multi': 20000, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
-                         'UR': {'exchange': 'CZCE', 'multi': 20, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
-                         'WH': {'exchange': 'CZCE', 'multi': 20, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
-                         'ZC': {'exchange': 'CZCE', 'multi': 100, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
-                         'a': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'ad': {'exchange': 'SHFE', 'multi': 10, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]},
-                         'ag': {'exchange': 'SHFE', 'multi': 15, 'format': 4, 'nightTime': [2100, 230], 'dayTime': [900, 1500]},
-                         'al': {'exchange': 'SHFE', 'multi': 5, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]},
-                         'ao': {'exchange': 'SHFE', 'multi': 20, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]},
-                         'au': {'exchange': 'SHFE', 'multi': 1000, 'format': 4, 'nightTime': [2100, 230], 'dayTime': [900, 1500]},
-                         'b': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'bb': {'exchange': 'DCE', 'multi': 500, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
-                         'bc': {'exchange': 'INE', 'multi': 5, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]},
-                         'br': {'exchange': 'SHFE', 'multi': 5, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'bu': {'exchange': 'SHFE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'bz': {'exchange': 'DCE', 'multi': 30, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'c': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'cs': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'cu': {'exchange': 'SHFE', 'multi': 5, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]},
-                         'eb': {'exchange': 'DCE', 'multi': 5, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'ec': {'exchange': 'INE', 'multi': 50, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
-                         'eg': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'fb': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
-                         'fu': {'exchange': 'SHFE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'hc': {'exchange': 'SHFE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'i': {'exchange': 'DCE', 'multi': 100, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'j': {'exchange': 'DCE', 'multi': 100, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'jd': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
-                         'jm': {'exchange': 'DCE', 'multi': 60, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'l': {'exchange': 'DCE', 'multi': 5, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'lc': {'exchange': 'GFFEX', 'multi': 1, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
-                         'lg': {'exchange': 'DCE', 'multi': 90, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
-                         'lh': {'exchange': 'DCE', 'multi': 16, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
-                         'lu': {'exchange': 'INE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'm': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'ni': {'exchange': 'SHFE', 'multi': 1, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]},
-                         'nr': {'exchange': 'INE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'op': {'exchange': 'SHFE', 'multi': 40, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'p': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'pb': {'exchange': 'SHFE', 'multi': 5, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]},
-                         'pd': {'exchange': 'GFEX', 'multi': 1000, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
-                         'pg': {'exchange': 'DCE', 'multi': 20, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'pp': {'exchange': 'DCE', 'multi': 5, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'ps': {'exchange': 'GFEX', 'multi': 3, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
-                         'pt': {'exchange': 'GFEX', 'multi': 1000, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
-                         'rb': {'exchange': 'SHFE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'rr': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'ru': {'exchange': 'SHFE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'sc': {'exchange': 'INE', 'multi': 1000, 'format': 4, 'nightTime': [2100, 230], 'dayTime': [900, 1500]},
-                         'si': {'exchange': 'GFEX', 'multi': 5, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
-                         'sn': {'exchange': 'SHFE', 'multi': 1, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]},
-                         'sp': {'exchange': 'SHFE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'ss': {'exchange': 'SHFE', 'multi': 5, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]},
-                         'v': {'exchange': 'DCE', 'multi': 5, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'wr': {'exchange': 'SHFE', 'multi': 10, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
-                         'y': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
-                         'zn': {'exchange': 'SHFE', 'multi': 5, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]}
-                         }
-        self.priceDict: Dict[str, float] = {}   # 最新价字典
-        self.myBrain: MyBrain = MyBrain()   # 策略大脑 -> 管理Position + Order -> on_start中初始化
+        self.infoDict = {
+            'AP': {'exchange': 'CZCE', 'multi': 10, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
+            'CF': {'exchange': 'CZCE', 'multi': 5, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'CJ': {'exchange': 'CZCE', 'multi': 5, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
+            'CY': {'exchange': 'CZCE', 'multi': 5, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'FG': {'exchange': 'CZCE', 'multi': 20, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'IC': {'exchange': 'CFFEX', 'multi': 200, 'format': 4, 'nightTime': False, 'dayTime': [930, 1500]},
+            'IF': {'exchange': 'CFFEX', 'multi': 300, 'format': 4, 'nightTime': False, 'dayTime': [930, 1500]},
+            'IH': {'exchange': 'CFFEX', 'multi': 300, 'format': 4, 'nightTime': False, 'dayTime': [930, 1500]},
+            'IM': {'exchange': 'CFFEX', 'multi': 200, 'format': 4, 'nightTime': False, 'dayTime': [930, 1500]},
+            'JR': {'exchange': 'CZCE', 'multi': 20, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
+            'MA': {'exchange': 'CZCE', 'multi': 10, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'OI': {'exchange': 'CZCE', 'multi': 10, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'PF': {'exchange': 'CZCE', 'multi': 5, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'PK': {'exchange': 'CZCE', 'multi': 5, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
+            'PL': {'exchange': 'CZCE', 'multi': 20, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'PM': {'exchange': 'CZCE', 'multi': 50, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
+            'PR': {'exchange': 'CZCE', 'multi': 15, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'PX': {'exchange': 'CZCE', 'multi': 5, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'RI': {'exchange': 'CZCE', 'multi': 20, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
+            'RM': {'exchange': 'CZCE', 'multi': 10, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'RS': {'exchange': 'CZCE', 'multi': 10, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
+            'SA': {'exchange': 'CZCE', 'multi': 20, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'SF': {'exchange': 'CZCE', 'multi': 5, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
+            'SH': {'exchange': 'CZCE', 'multi': 30, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'SM': {'exchange': 'CZCE', 'multi': 5, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
+            'SR': {'exchange': 'CZCE', 'multi': 10, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'T': {'exchange': 'CFFEX', 'multi': 10000, 'format': 4, 'nightTime': False, 'dayTime': [930, 150]},
+            'TA': {'exchange': 'CZCE', 'multi': 5, 'format': 3, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'TF': {'exchange': 'CFFEX', 'multi': 10000, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
+            'TL': {'exchange': 'CFFEX', 'multi': 10000, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
+            'TS': {'exchange': 'CFFEX', 'multi': 20000, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
+            'UR': {'exchange': 'CZCE', 'multi': 20, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
+            'WH': {'exchange': 'CZCE', 'multi': 20, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
+            'ZC': {'exchange': 'CZCE', 'multi': 100, 'format': 3, 'nightTime': False, 'dayTime': [900, 1500]},
+            'a': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'ad': {'exchange': 'SHFE', 'multi': 10, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]},
+            'ag': {'exchange': 'SHFE', 'multi': 15, 'format': 4, 'nightTime': [2100, 230], 'dayTime': [900, 1500]},
+            'al': {'exchange': 'SHFE', 'multi': 5, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]},
+            'ao': {'exchange': 'SHFE', 'multi': 20, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]},
+            'au': {'exchange': 'SHFE', 'multi': 1000, 'format': 4, 'nightTime': [2100, 230], 'dayTime': [900, 1500]},
+            'b': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'bb': {'exchange': 'DCE', 'multi': 500, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
+            'bc': {'exchange': 'INE', 'multi': 5, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]},
+            'br': {'exchange': 'SHFE', 'multi': 5, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'bu': {'exchange': 'SHFE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'bz': {'exchange': 'DCE', 'multi': 30, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'c': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'cs': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'cu': {'exchange': 'SHFE', 'multi': 5, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]},
+            'eb': {'exchange': 'DCE', 'multi': 5, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'ec': {'exchange': 'INE', 'multi': 50, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
+            'eg': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'fb': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
+            'fu': {'exchange': 'SHFE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'hc': {'exchange': 'SHFE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'i': {'exchange': 'DCE', 'multi': 100, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'j': {'exchange': 'DCE', 'multi': 100, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'jd': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
+            'jm': {'exchange': 'DCE', 'multi': 60, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'l': {'exchange': 'DCE', 'multi': 5, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'lc': {'exchange': 'GFFEX', 'multi': 1, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
+            'lg': {'exchange': 'DCE', 'multi': 90, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
+            'lh': {'exchange': 'DCE', 'multi': 16, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
+            'lu': {'exchange': 'INE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'm': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'ni': {'exchange': 'SHFE', 'multi': 1, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]},
+            'nr': {'exchange': 'INE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'op': {'exchange': 'SHFE', 'multi': 40, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'p': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'pb': {'exchange': 'SHFE', 'multi': 5, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]},
+            'pd': {'exchange': 'GFEX', 'multi': 1000, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
+            'pg': {'exchange': 'DCE', 'multi': 20, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'pp': {'exchange': 'DCE', 'multi': 5, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'ps': {'exchange': 'GFEX', 'multi': 3, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
+            'pt': {'exchange': 'GFEX', 'multi': 1000, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
+            'rb': {'exchange': 'SHFE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'rr': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'ru': {'exchange': 'SHFE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'sc': {'exchange': 'INE', 'multi': 1000, 'format': 4, 'nightTime': [2100, 230], 'dayTime': [900, 1500]},
+            'si': {'exchange': 'GFEX', 'multi': 5, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
+            'sn': {'exchange': 'SHFE', 'multi': 1, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]},
+            'sp': {'exchange': 'SHFE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'ss': {'exchange': 'SHFE', 'multi': 5, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]},
+            'v': {'exchange': 'DCE', 'multi': 5, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'wr': {'exchange': 'SHFE', 'multi': 10, 'format': 4, 'nightTime': False, 'dayTime': [900, 1500]},
+            'y': {'exchange': 'DCE', 'multi': 10, 'format': 4, 'nightTime': [2100, 2300], 'dayTime': [900, 1500]},
+            'zn': {'exchange': 'SHFE', 'multi': 5, 'format': 4, 'nightTime': [2100, 100], 'dayTime': [900, 1500]}
+            }
+        self.priceDict: Dict[str, float] = {}  # 最新价字典
+        self.myBrain: MyBrain = MyBrain()  # 策略大脑 -> 管理Position + Order -> on_start中初始化
         # 禁止下单+监控的品种
         self.deleteProduct: List[str] = self.config["deleteProduct"]
         # 所有需要被监视的合约+交易所(为了节省轮寻时间 -> 只对需要交易的品种进行实时监控)
-        self.monitorContract: List[str] = []    # 需要监视的合约
-        self.monitorExchange: List[str] = []    # 对应的交易所代码
+        self.monitorContract: List[str] = []  # 需要监视的合约
+        self.monitorExchange: List[str] = []  # 对应的交易所代码
         self.oriPosDict: Dict[str, Dict[str, Dict[str, Position]]] = {}  # 获取当前账号所有持仓
         self.market_center: MarketCenter = MarketCenter()  # 行情获取中心
         self.kline_generators: Dict[str, KLineGenerator] = {}  # 所有品种的1分钟K线合成器
@@ -185,8 +188,10 @@ class MyStrategy(BaseStrategy):
         self.output(self.oriPosDict)
 
         # 本地加载Position + Order -> MyBrain初始化
-        self.myBrain.init(pathStr=self.pathStr, longPosFile=self.longPosFile, shortPosFile=self.shortPosFile, orderFile=self.orderFile)
-        currentPosContract = list(set(list(self.myBrain.Position.longPos.keys())+list(self.myBrain.Position.shortPos.keys())))     # 当前持仓合约
+        self.myBrain.init(pathStr=self.pathStr, longPosFile=self.longPosFile, shortPosFile=self.shortPosFile,
+                          orderFile=self.orderFile)
+        currentPosContract = list(
+            set(list(self.myBrain.Position.longPos.keys()) + list(self.myBrain.Position.shortPos.keys())))  # 当前持仓合约
 
         # 向基本信息表中添加查询后的合约信息
         self.deleteProduct = product_formatter(productList=self.deleteProduct, infoDict=self.infoDict)
@@ -200,7 +205,8 @@ class MyStrategy(BaseStrategy):
         for product in self.deleteProduct:
             if product in self.infoDict:
                 del self.infoDict[product]
-        mainContractInfo = contractInfo[contractInfo["isMainContract"] == 1].reset_index(drop=True)  # 这里isMainContract都是1, 这样写为了方便后续拓展
+        mainContractInfo = contractInfo[contractInfo["isMainContract"] == 1].reset_index(
+            drop=True)  # 这里isMainContract都是1, 这样写为了方便后续拓展
         mainContractDict = dict(zip(mainContractInfo["product"], mainContractInfo["contract"]))
         for product, info in self.infoDict.items():
             self.infoDict[product]["mainContract"] = mainContractDict[product]
@@ -220,9 +226,9 @@ class MyStrategy(BaseStrategy):
         self.output("""[INFO] 本地加载信号完毕""")
 
         # 监控任务: 决定本次运行所有需要监视的合约 + 交易所
-        contractList = list(set(currentPosContract+toOpenContract))  # 所有监控合约 = 上次持仓+本次新开
+        contractList = list(set(currentPosContract + toOpenContract))  # 所有监控合约 = 上次持仓+本次新开
         self.monitorContract = contract_formatter(contractList=contractList, infoDict=self.infoDict)
-        productList = list(["".join([j for j in i if str(j).isalpha()]) for i in self.monitorContract])   # 当前持仓品种
+        productList = list(["".join([j for j in i if str(j).isalpha()]) for i in self.monitorContract])  # 当前持仓品种
         self.monitorExchange = [self.infoDict[product]["exchange"] for product in productList]
         self.output(f"[INFO] 准备监控合约: {self.monitorContract}")
         # 每个合约获取最近1根1分钟K线
@@ -276,10 +282,21 @@ class MyStrategy(BaseStrategy):
                    int(order.offset),  # 开平仓标志
                    pd.Timestamp(order.cancel_time),
                    pd.Timestamp(order.order_time),
+                   str(order.status),
                    str(order.memo),
                    pd.Timestamp.now()
                    ]
         self.session.run(f"tableInsert{ {tableName} }", rowData)
+        direction: str = "long" if int(order.direction) == 0 else "short"
+        self.myBrain.onOrder(currentTime=pd.Timestamp(order.order_time),
+                             status=str(order.status),
+                             symbol=order.instrument_id,
+                             direction=direction,
+                             offset=int(order.offset),
+                             totalVol=order.total_volume,
+                             tradedVol=order.traded_volume,
+                             cancelVol=order.cancel_volume,
+                             memo=str(order.memo))
 
     def on_cancel(self, order: OrderData) -> None:
         """撤单推送回调"""
@@ -302,7 +319,7 @@ class MyStrategy(BaseStrategy):
             trade.order_id,
             trade.order_sys_id,
             trade.trade_time,
-            int(trade.direction),   # 0: 多/ 1: 空
+            int(trade.direction),  # 0: 多/ 1: 空
             int(trade.offset),
             trade.price,
             trade.volume,
@@ -345,32 +362,33 @@ class MyStrategy(BaseStrategy):
         openPrice = kline.open
         closePrice = kline.close
         currentTime = pd.Timestamp(kline.datetime)
+        self.priceDict[symbol] = closePrice
         eventList: Dict[int, OrderOpenEvent | OrderCloseEvent] = \
-            self.myBrain.onBar(currentTime=currentTime, symbol=symbol, price=openPrice)    # 这里使用openPrice作为作为止盈止损的price
+            self.myBrain.onBar(currentTime=currentTime, symbol=symbol, price=openPrice)  # 这里使用openPrice作为作为止盈止损的price
         # 下单事件
-        idDict: Dict[int, int] = {} # memo(myBrain中的事件编号): int(交易所中的报单)
+        idDict: Dict[int, int] = {}  # memo(myBrain中的事件编号): int(交易所中的报单)
         for event in eventList:
             symbolStr = event.symbol
             directionStr = "0" if event.direction == "long" else "short"
             exchangeStr = self.infoDict[symbolStr]["exchange"]
             orderId: int = -1
-            if event.state == "open":    # 开仓事件
+            if event.state == "open":  # 开仓事件
                 orderId: int = self.send_order(exchange=exchangeStr,
-                                instrument_id=symbolStr,
-                                volume=event.vol,
-                                price=self.priceDict[symbolStr],
-                                order_direction=directionStr,
-                                order_type="GFD",  # 报单指令
-                                market=True,    # true: 市价单成交 false: 限价单成交
-                                memo=str(event.memo))
-            elif event.state == "close":   # 平仓事件
+                                               instrument_id=symbolStr,
+                                               volume=event.vol,
+                                               price=self.priceDict[symbolStr],
+                                               order_direction=directionStr,
+                                               order_type="GFD",  # 报单指令
+                                               market=True,  # true: 市价单成交 false: 限价单成交
+                                               memo=str(event.memo))
+            elif event.state == "close":  # 平仓事件
                 orderId: int = self.auto_close_position(exchange=exchangeStr,
                                                         instrument_id=symbolStr,
                                                         volume=event.vol,
                                                         price=self.priceDict[symbolStr],
                                                         order_type="GFD",
                                                         shfe_close_first=True,
-                                                        market=True,    # true: 市价单成交 false: 限价单成交
+                                                        market=True,  # true: 市价单成交 false: 限价单成交
                                                         memo=str(event.memo))
             idDict[int(event.memo)] = orderId
         self.myBrain.linkOrderId(idDict=idDict)
