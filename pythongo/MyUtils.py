@@ -159,10 +159,10 @@ def get_info(self, monitorProduct: List[str] = None, deleteProduct: List[str] = 
         infoDF["nightCloseTime"] = infoDF["nightCloseTime"].apply(lambda x:pd.Timestamp({"2300": currentDateStr}.get(x, nextDateStr)+" "+x[:2]+":"+x[2:]+":00") if x else None)
         infoDF["dayOpenTime"] = infoDF["dayOpenTime"].apply(lambda x:pd.Timestamp(nextDateStr+" "+x[:2]+":"+x[2:]+":00") if x else None)
         infoDF["dayCloseTime"] = infoDF["dayCloseTime"].apply(lambda x:pd.Timestamp(nextDateStr+" "+x[:2]+":"+x[2:]+":00") if x else None)
-        infoDF["openTime"] = infoDF.apply(lambda row: row["nightOpenTime"] if pd.notnull(row["nightOpenTime"]) else row["dayOpenTime"], axis=1)
-        infoDF["closeTime"] = infoDF["dayCloseTime"]    # 必定有日盘 -> 收盘即为日盘时间
-        infoDF = infoDF[["product","exchange","contract","multi","longMarginRate","shortMarginRate",
-                         "hasNightTrade","openTime","closeTime",
-                         "nightOpenTime","nightCloseTime","dayOpenTime","dayCloseTime",
-                         "isMainContract"]]   # 调整列顺序
+    infoDF["openTime"] = infoDF.apply(lambda row: row["nightOpenTime"] if pd.notnull(row["nightOpenTime"]) else row["dayOpenTime"], axis=1)
+    infoDF["closeTime"] = infoDF["dayCloseTime"]    # 必定有日盘 -> 收盘即为日盘时间
+    infoDF = infoDF[["product","exchange","contract","multi","longMarginRate","shortMarginRate",
+                    "hasNightTrade","openTime","closeTime",
+                    "nightOpenTime","nightCloseTime","dayOpenTime","dayCloseTime",
+                    "isMainContract"]]   # 调整列顺序
     return infoDF
