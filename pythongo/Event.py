@@ -25,6 +25,7 @@ Function2: 自动补全Event中的属性, 避免回调函数中的重复计算
 class Event:  # 基本事件类
     def __init__(self, symbol: str, direction: str, marginRate: float = None, multi: int = None,
                  minTimestamp: pd.Timestamp = None, maxTimestamp: pd.Timestamp = None, memo: str = ""):
+        self.state: str = ""
         self.symbol: str = symbol
         self.direction: str = direction
         self.marginRate: float = marginRate

@@ -17,8 +17,17 @@
     "shortPosFile": "shortPos.json5",
     "orderFile": "order.json5"
   },
-  "infoFile": "",
-  "signalFile": "E://Quant//PyBackTest//test//futStrategy//realTimeSignal.csv",
+  "infoFile": "E://Quant//QuantTrader//infiniTrader//cons//infoDict.json5",
+  /*
+  强制包含:
+  exchange: 交易所
+  multi: 交易乘数
+  format: 格式
+  nightTime: 夜盘时间
+  dayTime: 日盘时间
+  (剩余信息在on_start中进行补充, 最终输出完整的self.infoDict)
+  */
+  "signalFile": null, // "E://Quant//PyBackTest//test//futStrategy//realTimeSignal.csv",
   /*
   强制包含:
   product: 品种名称

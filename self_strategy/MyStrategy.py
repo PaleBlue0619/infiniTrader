@@ -29,7 +29,6 @@ y: 后续考虑将所有流数据表开启持久化 or 直接用dimensionTable�
 z: TWAP/VWAP进行下单 -> 由于个人交易下单量较小+持仓周期日级别以上, ask1/bid1已经能满足盘口, 所以该需求的优先级不高
 """
 
-
 class Params(BaseParams):
     """参数映射模型 -> 从无限易窗口中传入的参数定义的值
     Field: 自定义元数据->添加至参数映射模型的字段中
@@ -80,9 +79,9 @@ class MyStrategy(BaseStrategy):
                          dropTB=self.config["record"]["dropTB"])
 
         # 行情数据类
-        self.priceDict: Dict[str, float] = {}   # 最新价字典
+        self.priceDict: Dict[str, float] = {}   # 最新价字典 -> on_start中初始化为infiniTrader.xlsx中的值
         # 由于不做股指+国债期货(即CFX交易所的品种), 所以这里直接日盘取连续的就好, 回调中统一处理1015+1130+1330这三个断点
-        with open(self.config["infoFIle"], "r", encoding="r") as f:
+        with open(self.config["infoFile"], "r", encoding="utf-8") as f:
             self.infoDict = json5.load(f)
         self.deleteProduct: List[str] = self.config["deleteProduct"]         # 禁止下单+监控的品种
         # 所有需要被监视的合约+交易所(为了节省轮寻时间 -> 只对需要交易的品种进行实时监控)
@@ -103,15 +102,19 @@ class MyStrategy(BaseStrategy):
             os.mkdir(self.pathStr)
 
         # 获取当前所有持仓
-        self.oriPosDict = self.get_all_position()  # TODO: 调用接口获取当前账户所有持仓
+        self.oriPosDict = self.get_all_position()  # TODO: 如何将oriPosDict注册进myPosition(当本地持仓文件缺失的时候)
         self.output("[INFO] 当前持仓: ")
         self.output(self.oriPosDict)
 
-        # 本地加载Position + Order -> MyBrain初始化
+        # 本地加载Position + Order -> myPosition & myOrder初始化
         self.myPosition.inputPos(direction="long", savePath=self.pathStr, fileName=self.longPosFile)
         self.myPosition.inputPos(direction="short", savePath=self.pathStr, fileName=self.shortPosFile)
         self.myOrder.inputOrder(savePath=self.pathStr, fileName=self.orderFile)
         currentPosContract = list(set(list(self.myPosition.longPos.keys())+list(self.myPosition.shortPos.keys())))     # 当前持仓合约
+
+        # priceDict初始化
+        mainContDF = pd.read_excel(rf"{self.pathStr}\{self.config['record']['infiniFile']}", index_col=None, header=0)
+        self.priceDict = dict(zip(mainContDF["合约代码"], mainContDF["最新"]))
 
         # 向基本信息表中添加查询后的合约信息
         self.deleteProduct = product_formatter(productList=self.deleteProduct, infoDict=self.infoDict)
@@ -135,18 +138,22 @@ class MyStrategy(BaseStrategy):
         self.output("""[INFO] infoDict更新完毕""")
 
         # 本地加载未完成订单
-        self.addHistEvents()
+        addHistEvents(self)
         self.output("""[INFO] 加载未完成订单""")
 
         # 本地加载开仓信号 + 规范品种&合约名称 -> 没有则跳过
-        openSignal = pd.read_csv(self.signalFile, index_col=None, header=0).rename(columns={"contract": "symbol"})
-        openSignal["product"] = product_formatter(productList=list(openSignal["product"]), infoDict=self.infoDict)
-        openSignal["symbol"] = contract_formatter(contractList=list(openSignal["symbol"]), infoDict=self.infoDict)
-        openSignal = openSignal[~openSignal["product"].isin(self.deleteProduct)].reset_index(drop=True)  # 剔除黑名单品种
-        toOpenContract = list(openSignal["symbol"])
-        self.addOpenEvents(data=openSignal, info=contractInfo)
-        self.output("""[INFO] 本地加载信号完毕""")
-        for event in self.myBrain.eventWait.values():
+        toOpenContract: List[str] = []  # 需要新开的合约
+        if self.signalFile:     # 如果有signalFile
+            openSignal = pd.read_csv(self.signalFile, index_col=None, header=0).rename(columns={"contract": "symbol"})
+            openSignal["product"] = product_formatter(productList=list(openSignal["product"]), infoDict=self.infoDict)
+            openSignal["symbol"] = contract_formatter(contractList=list(openSignal["symbol"]), infoDict=self.infoDict)
+            openSignal = openSignal[~openSignal["product"].isin(self.deleteProduct)].reset_index(drop=True)  # 剔除黑名单品种
+            toOpenContract = list(openSignal["symbol"])
+            addOpenEvents(self=self, data=openSignal, info=contractInfo)
+            self.output("""[INFO] 本地加载信号完毕""")
+        else:
+            self.output("""[INFO] 本地加载信号为空""")
+        for event in self.eventWait.values():
             self.output(event.__dict__)
 
         # 监控任务: 决定本次运行所有需要监视的合约 + 交易所
@@ -212,8 +219,8 @@ class MyStrategy(BaseStrategy):
     def on_cancel(self, order: OrderData) -> None:
         """撤单推送回调"""
         super().on_cancel(order)
-        if order.order_id != -1:
-            self.myBrain.onCancel(orderId=order.order_id)
+        self.output(f"[Msg] 撤单成功: {order.__dict__}")
+        return
 
     def on_trade(self, trade: TradeData, log: bool = False) -> None:
         """成交回调函数"""
@@ -224,9 +231,9 @@ class MyStrategy(BaseStrategy):
         event = self.eventDoing[orderId]    # 原始事件
         if event.delete:
             del self.eventDoing[orderId]
-        symbol = event.symbol
-        price = event.price
-        vol = event.vol
+        symbol = trade.symbol
+        price = trade.price
+        vol = trade.volume
         direction = "long" if int(trade.direction) == 0 else "short"
         offset = int(trade.offset)  # 开仓/平仓标志
         if offset == 0:     # 开仓/加仓成交
@@ -263,17 +270,17 @@ class MyStrategy(BaseStrategy):
         openPrice = kline.open
         closePrice = kline.close
         currentTime = pd.Timestamp(kline.datetime)
-
         if self.lastMinute == int(currentTime.minute):   # 说明Bar发生了变动 -> 下一个时间截面
             return
 
         self.lastMinute = int(currentTime.minute)
         # 1. 开平仓事件
+        deleteList: List[int] = []  # 需要被删除的事件编号
         for idx, event in self.eventWait.items():
             # 获取基本信息
             symbolStr = event.symbol
             productStr = "".join([i for i in symbolStr if str(i).isalpha()])
-            directionStr = "0" if event.direction == "long" else "1"
+            directionStr = "buy" if event.direction == "long" else "sell"
             exchangeStr = self.infoDict[productStr]["exchange"]
             self.eventIdx += 1
             if event.state == "open":   # 开仓事件
@@ -291,6 +298,7 @@ class MyStrategy(BaseStrategy):
                 orderId: int = self.auto_close_position(
                     exchange=exchangeStr,
                     instrument_id=symbolStr,
+                    order_direction=directionStr,
                     volume=event.vol,
                     price=self.priceDict[symbolStr],
                     order_type="GFD",
@@ -300,9 +308,12 @@ class MyStrategy(BaseStrategy):
                 )
             if orderId not in [-1, None]:   # 执行成功
                 self.eventDoing[orderId] = event
-                del self.eventWait[idx]
+                deleteList.append(idx)
             else:   # 执行失败
                 continue
+        if deleteList:
+            for idx in deleteList:
+                del self.eventWait[idx]
 
         # 2. 多仓: 持仓时间+止盈止损监控事件
         for symbol in self.myPosition.longPos:

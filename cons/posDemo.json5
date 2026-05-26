@@ -1,0 +1,18 @@
+{'bu2609':
+  {'1':
+    {'long': {'exchange': 'SHFE', 'instrument_id': 'bu2609', 'position': 1, 'position_close': 1,
+            'frozen_position': 0, 'frozen_closing': 0, 'td_frozen_closing': 0, 'td_close_available': 1, 'td_position_close': 1,
+            'yd_frozen_closing': 0, 'yd_close_available': 0, 'yd_position_close': 0,
+            'open_volume': 22, 'close_volume': 21, 'strike_frozen_position': 0, 'abandon_frozen_position': 0,
+            'position_cost': 42260.0, 'yd_position_cost': 0.0, 'close_profit': 5990.0, 'position_profit': -150.0,
+            'open_avg_price': 4226.0, 'position_avg_price': 4226.0, 'used_margin': 3803.3999999999996, 'close_available': 1},
+    'short': {'exchange': '', 'instrument_id': '', 'position': 0, 'position_close': 0,
+      'frozen_position': 0, 'frozen_closing': 0, 'td_frozen_closing': 0, 'td_close_available': 0, 'td_position_close': 0,
+      'yd_frozen_closing': 0, 'yd_close_available': 0, 'yd_position_close': 0,
+      'open_volume': 0, 'close_volume': 0, 'strike_frozen_position': 0, 'abandon_frozen_position': 0,
+      'position_cost': 0.0, 'yd_position_cost': 0.0, 'close_profit': 0.0, 'position_profit': 0.0,
+      'open_avg_price': 0.0, 'position_avg_price': 0.0, 'used_margin': 0.0, 'close_available': 0},
+      'net_position': 1, 'position': 1}
+  },
+  'jm2609': {'1': {'long': {'exchange': 'DCE', 'instrument_id': 'jm2609', 'position': 0, 'position_close': 0, 'frozen_position': 2, 'frozen_closing': 0, 'td_frozen_closing': 0, 'td_close_available': 0, 'td_position_close': 0, 'yd_frozen_closing': 0, 'yd_close_available': 0, 'yd_position_close': 0, 'open_volume': 0, 'close_volume': 0, 'strike_frozen_position': 0, 'abandon_frozen_position': 0, 'position_cost': 0.0, 'yd_position_cost': 0.0, 'close_profit': 0.0, 'position_profit': 0.0, 'open_avg_price': 0.0, 'position_avg_price': 0.0, 'used_margin': 0.0, 'close_available': 0}, 'short': {'exchange': '', 'instrument_id': '', 'position': 0, 'position_close': 0, 'frozen_position': 0, 'frozen_closing': 0, 'td_frozen_closing': 0, 'td_close_available': 0, 'td_position_close': 0, 'yd_frozen_closing': 0, 'yd_close_available': 0, 'yd_position_close': 0, 'open_volume': 0, 'close_volume': 0, 'strike_frozen_position': 0, 'abandon_frozen_position': 0, 'position_cost': 0.0, 'yd_position_cost': 0.0, 'close_profit': 0.0, 'position_profit': 0.0, 'open_avg_price': 0.0, 'position_avg_price': 0.0, 'used_margin': 0.0, 'close_available': 0}, 'net_position': 0, 'position': 0}}, 'MA609': {'1': {'long': {'exchange': 'CZCE', 'instrument_id': 'MA609', 'position': 2, 'position_close': 2, 'frozen_position': 0, 'frozen_closing': 0, 'td_frozen_closing': 0, 'td_close_available': 2, 'td_position_close': 2, 'yd_frozen_closing': 0, 'yd_close_available': 0, 'yd_position_close': 0, 'open_volume': 4, 'close_volume': 2, 'strike_frozen_position': 0, 'abandon_frozen_position': 0, 'position_cost': 58460.0, 'yd_position_cost': 0.0, 'close_profit': 1760.0, 'position_profit': -80.0, 'open_avg_price': 2923.0, 'position_avg_price': 2923.0, 'used_margin': 4092.2000000000003, 'close_available': 2}, 'short': {'exchange': '', 'instrument_id': '', 'position': 0, 'position_close': 0, 'frozen_position': 0, 'frozen_closing': 0, 'td_frozen_closing': 0, 'td_close_available': 0, 'td_position_close': 0, 'yd_frozen_closing': 0, 'yd_close_available': 0, 'yd_position_close': 0, 'open_volume': 0, 'close_volume': 0, 'strike_frozen_position': 0, 'abandon_frozen_position': 0, 'position_cost': 0.0, 'yd_position_cost': 0.0, 'close_profit': 0.0, 'position_profit': 0.0, 'open_avg_price': 0.0, 'position_avg_price': 0.0, 'used_margin': 0.0, 'close_available': 0}, 'net_position': 2, 'position': 2}}
+}

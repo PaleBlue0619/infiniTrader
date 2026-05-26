@@ -56,9 +56,11 @@ def createInfoTable(session: ddb.session, tableName: str, dropTB: bool = False):
 def createOrderTable(session: ddb.session, tableName: str, dropTB: bool = False):
     """DolphinDB 订单流表"""
     colNames = ["exchange", "contract", "price", "orderId", "orderSysId",
-                "orderPriceType", "direction", "offset", "cancelTime", "orderTime", "currentTime"]
+                "orderPriceType", "direction", "offset", "cancelTime", "orderTime",
+                "status", "memo", "currentTime"]
     colTypes = ["SYMBOL", "SYMBOL", "DOUBLE", "INT", "STRING",
-                "INT", "INT", "INT", "TIMESTAMP", "TIMESTAMP", "TIMESTAMP"]
+                "INT", "INT", "INT", "TIMESTAMP", "TIMESTAMP",
+                "STRING", "STRING", "TIMESTAMP"]
     # orderPriceType 需要 string -> int
     # direction 需要 string -> int
     # cancelTime&orderTime 需要 string -> pd.Timestamp
@@ -74,9 +76,9 @@ def createOrderTable(session: ddb.session, tableName: str, dropTB: bool = False)
 def createTradeTable(session: ddb.session, tableName: str, dropTB: bool = False):
     """"DolphinDB 交易流表"""
     colNames = ["exchange", "contract", "tradeId", "orderId", "orderSysId", "tradeTime",
-                "direction", "offset", "price", "volume", "status", "memo", "currentTime"]
+                "direction", "offset", "price", "volume", "memo", "currentTime"]
     colTypes = ["SYMBOL", "SYMBOL", "INT", "INT", "INT", "TIMESTAMP",
-                "INT", "INT", "DOUBLE", "INT", "STRING", "STRING", "TIMESTAMP"]
+                "INT", "INT", "DOUBLE", "INT", "STRING", "TIMESTAMP"]
     # direction 需要 string -> int
     session.upload({"colNames": colNames, "colTypes": colTypes})
     session.run(f"""
@@ -119,7 +121,7 @@ def get_info(self, monitorProduct: List[str] = None, deleteProduct: List[str] = 
                                 savePath=self.pathStr, fileName="marginInfo.csv")
     # 交易星球数据不如infiniTrader自身给的主力合约质量高
     mainContDF = pd.read_excel(rf"{self.pathStr}\{self.config['record']['infiniFile']}",index_col=None, header=0)
-    mainContDict = dict(zip(mainContDF["品种"], mainContDF["合约名称"]))
+    mainContDict = dict(zip(mainContDF["品种"], mainContDF["合约代码"]))
     infoDF = infoDF[infoDF["isMainContract"] == 1].reset_index(drop=True)
     infoDF["product"] = infoDF["contract"].apply(lambda x: "".join([str(i) for i in x if str(i).isalpha()]))
     infoDF["contract"] = infoDF["product"].map(mainContDict)    # 更新主力合约 -> 交易星球的大写字母合约real_html解析会吞掉前面的年份, 但年份无法确定, 保险起见全部用无限易的主力合约
@@ -174,7 +176,6 @@ def addHistEvents(self) -> None:
     orderDict = self.myOrder.getOrder()
     deleteIdx: List[int] = []
     mainContractList: List[str] = [i["mainContract"] for i in self.infoDict.values()]
-    if len(orderDict) > 0:
     for idx, order in orderDict.items():
         symbol = order["symbol"]
         product = "".join([i for i in symbol if str(i).isalpha()])
@@ -183,14 +184,16 @@ def addHistEvents(self) -> None:
                 deleteIdx.append(idx)
                 continue
             multi = self.infoDict[product]["multi"]
-            marginRate = self.infoDict[product]["longMarginRate"] if order["direction"]=="long" else self.infoDict[product]["shortMarginRate"]
+            marginRate = self.infoDict[product]["longMarginRate"] if order["direction"] == "long" \
+                else self.infoDict[product]["shortMarginRate"]
             vol = int(order["vol"])
+            price = order["price"]
             volume = vol * multi
             self.eventIdx += 1
             E = OrderOpenEvent(  # 初始化对象
                 symbol=symbol,
                 direction=order["direction"],
-                amount=int(order["vol"] * order["price"]),
+                amount=vol * price,
                 vol=vol,
                 volume=volume,
                 multi=multi,
@@ -228,17 +231,19 @@ def addOpenEvents(self, data: pd.DataFrame, info: pd.DataFrame) -> None:
     """
     # Step2. 今日开仓计划
     info_ = info[["contract", "product", "multi", "longMarginRate", "shortMarginRate",
-                    "hasNightTrade", "openTime", "closeTime"]].rename(
+                "hasNightTrade", "openTime", "closeTime"]].rename(
         columns={"contract": "symbol"}
     )
-    data_ = data[["symbol","direction","product", "minOrderTimestamp", "maxOrderTimestamp",
-                     "minPosTimestamp", "maxPosTimestamp", "amount","price","upLimit","downLimit"]]   # 这里的price是最新价 -> 用于计算vol&volume
-    data_ = pd.merge(data_, info_, how="left", on=["symbol","product"])
+    data_ = data[["symbol", "direction", "product", "minOrderTimestamp", "maxOrderTimestamp",
+                "minPosTimestamp", "maxPosTimestamp", "amount", "price", "upLimit", "downLimit"]]   # 这里的price是用户提供的最新价 -> 用于计算vol&volume
+    # 添加最新价
+    data_["price"] = data_["symbol"].map(self.priceDict).fillna(data_["price"])  # 尽量替换成infiniTrader内部的最新价
+    data_ = pd.merge(data_, info_, how="left", on=["symbol", "product"])
     for _, row in data_.iterrows():         # 每一行->开仓事件
         marginRate = row["longMarginRate"] if row["direction"] == "long" else row["shortMarginRate"]
         # 计算vol(手数)以及volume(交易乘数)
-        volume = int((row["amount"] / marginRate) / row["price"])
-        vol = volume - volume % row["multi"]    # 向下取整
+        volume = int((row["amount"] / marginRate) / row["price"])    # vol * multi
+        vol = int((volume - volume % row["multi"])/ row["multi"])    # 向下取整 -> 报单手数
         self.eventIdx += 1
         E = OrderOpenEvent(  # 初始化对象
                 symbol=row["symbol"],
