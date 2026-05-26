@@ -8,7 +8,7 @@ from pythongo.MyPosition import MyPosition
 from pythongo.MyOrder import MyOrder
 from pythongo.Event import Event, OrderOpenEvent, OrderCloseEvent
 from pythongo.MyUtils import createInfoTable, createTradeTable, createOrderTable, \
-    product_formatter, contract_formatter, process_marginRate, get_info
+    product_formatter, contract_formatter, process_marginRate, get_info, addHistEvents, addOpenEvents
 # 从 base 库中导入定义参数和状态映射模型必须的三个方法
 from pythongo.base import BaseParams, BaseState, Field, BaseStrategy
 from pythongo.classdef import KLineData, OrderData, TickData, TradeData, Position
