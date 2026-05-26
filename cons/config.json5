@@ -17,6 +17,7 @@
     "shortPosFile": "shortPos.json5",
     "orderFile": "order.json5"
   },
+  "infoFile": "",
   "signalFile": "E://Quant//PyBackTest//test//futStrategy//realTimeSignal.csv",
   /*
   强制包含:
