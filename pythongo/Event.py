@@ -1,0 +1,66 @@
+import pandas as pd
+from copy import copy
+from pythongo.MyPosition import MyPosition
+from pythongo.MyOrder import MyOrder
+from typing import Dict, List
+
+"""
+这里必须抽象出MyBrain -> 作为缓冲层[用户层-MyBrain-回调层]
+Function1: 管理开仓/平仓的行为
+MyBrain->待发送Event
+MyBrain->已发送待收到回报Event
+已完成Event自动销毁
+Function2: 自动补全Event中的属性, 避免回调函数中的重复计算
+整体原则: 先确定eventWait eventDoing中的编号, 再输出执行
+开仓From: 历史未下单的开仓Order + 外部开仓信号csv 
+平仓From: 历史未下单的平仓Order + 监控(止盈止损+最长持仓时间)
+"""
+
+# Event 类重构
+# Event(父类): 包括品种基本信息+方向+时间 symbol direction multi marginRate createTime minTimestamp maxTimestamp
+# Event的子类-
+#   OrderOpenEvent: amount vol volume minPosTimestamp maxPosTimestamp staticHigh staticLow
+#   OrderCloseEvent: vol
+
+class Event:  # 基本事件类
+    def __init__(self, symbol: str, direction: str, marginRate: float = None, multi: int = None,
+                 minTimestamp: pd.Timestamp = None, maxTimestamp: pd.Timestamp = None, memo: str = ""):
+        self.symbol: str = symbol
+        self.direction: str = direction
+        self.marginRate: float = marginRate
+        self.multi: int = multi
+        self.createTimestamp: pd.Timestamp = pd.Timestamp.now()
+        self.minTimestamp: pd.Timestamp = minTimestamp
+        self.maxTimestamp: pd.Timestamp = maxTimestamp
+        self.memo: str = memo   # 事件备注
+        self.delete: bool = False   # 该事件是否应该被删除(部分成交/其他未执行完的事件-> False)
+        self.orderId: int = None    # 订单编号
+
+    def copy(self) -> "Event":
+        """浅拷贝自身"""
+        return copy(self)
+
+class OrderOpenEvent(Event):    # 开仓订单事件类
+    def __init__(self, symbol: str, direction: str, marginRate: float, multi: int,
+                 amount: float, vol: int, volume: int,
+                 minTimestamp: pd.Timestamp = None, maxTimestamp: pd.Timestamp = None,
+                 minPosTimestamp: pd.Timestamp = None, maxPosTimestamp: pd.Timestamp = None,
+                 upLimit: float = None, downLimit: float = None, memo: str = ""):
+        super(OrderOpenEvent, self).__init__(symbol=symbol, direction=direction, marginRate=marginRate, multi=multi,
+                                             minTimestamp=minTimestamp, maxTimestamp=maxTimestamp, memo=memo)
+        self.state: str = "open"
+        self.amount: float = amount
+        self.vol: int = vol
+        self.volume: int = volume
+        self.minPosTimestamp: pd.Timestamp = minPosTimestamp
+        self.maxPosTimestamp: pd.Timestamp = maxPosTimestamp
+        self.upLimit: float = upLimit
+        self.downLimit: float = downLimit
+
+class OrderCloseEvent(Event):   # 平仓订单事件类
+    def __init__(self, symbol: str, direction: str, vol: int, marginRate: float = None, multi: int = None,
+                 minTimestamp: pd.Timestamp = None, maxTimestamp: pd.Timestamp = None, memo: str = ""):
+        super(OrderCloseEvent, self).__init__(symbol=symbol, direction=direction, marginRate=marginRate, multi=multi,
+                                             minTimestamp=minTimestamp, maxTimestamp=maxTimestamp, memo=memo)
+        self.state = "close"
+        self.vol: int = vol

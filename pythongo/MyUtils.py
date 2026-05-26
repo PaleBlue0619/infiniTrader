@@ -1,6 +1,7 @@
 import pandas as pd
 import dolphindb as ddb
 from typing import List, Dict
+from pythongo.Event import Event, OrderOpenEvent, OrderCloseEvent
 
 def product_formatter(productList: List[str], infoDict: Dict[str, Dict[str, any]]) -> List[str]:
     """把品种代码映射为无限易的代码"""
@@ -166,3 +167,92 @@ def get_info(self, monitorProduct: List[str] = None, deleteProduct: List[str] = 
                     "nightOpenTime","nightCloseTime","dayOpenTime","dayCloseTime",
                     "isMainContract"]]   # 调整列顺序
     return infoDF
+
+def addHistEvents(self) -> None:
+    """Step1. 加载历史未完成订单"""
+    # Step1. 历史未完成订单 -> eventWait(orderOpenEvent)
+    orderDict = self.myOrder.getOrder()
+    deleteIdx: List[int] = []
+    mainContractList: List[str] = [i["mainContract"] for i in self.infoDict.values()]
+    if len(orderDict) > 0:
+    for idx, order in orderDict.items():
+        symbol = order["symbol"]
+        product = "".join([i for i in symbol if str(i).isalpha()])
+        if order["state"] == "open":  # 开仓 + 多单
+            if symbol not in mainContractList:  # 说明不是主力合约/没有该合约的信息
+                deleteIdx.append(idx)
+                continue
+            multi = self.infoDict[product]["multi"]
+            marginRate = self.infoDict[product]["longMarginRate"] if order["direction"]=="long" else self.infoDict[product]["shortMarginRate"]
+            vol = int(order["vol"])
+            volume = vol * multi
+            self.eventIdx += 1
+            E = OrderOpenEvent(  # 初始化对象
+                symbol=symbol,
+                direction=order["direction"],
+                amount=int(order["vol"] * order["price"]),
+                vol=vol,
+                volume=volume,
+                multi=multi,
+                marginRate=marginRate,
+                minTimestamp=order["minOrderTime"],
+                maxTimestamp=order["maxOrderTime"],
+                minPosTimestamp=order["minPosTime"],
+                maxPosTimestamp=order["maxPosTime"],
+                upLimit=order["upLimit"],
+                downLimit=order["downLimit"],
+                memo=str(self.eventIdx)
+            )
+            self.eventWait[self.eventIdx] = E
+        else:  # 平仓
+            self.eventIdx += 1
+            E = OrderCloseEvent(
+                symbol=symbol,
+                direction=order["direction"],
+                vol=int(order["vol"]),
+                minTimestamp=order["minOrderTime"],
+                maxTimestamp=order["maxOrderTime"],
+                memo=str(self.eventIdx)
+            )
+            self.eventWait[self.eventIdx] = E
+    if deleteIdx:
+        for idx in self.deleteIdx:
+            self.myOrder.cancelOrder(idx=idx)
+
+def addOpenEvents(self, data: pd.DataFrame, info: pd.DataFrame) -> None:
+    """
+    Step2. 加入本次开仓信息
+    [非常重要!!!] -> 从这里之后本次策略的交易计划就定下来了, 这里一定要处理正确!
+    data: 开仓计划(from PyBackTest + 已经formatter了之后)
+    info: 合约信息(from DolphinDB流表)
+    """
+    # Step2. 今日开仓计划
+    info_ = info[["contract", "product", "multi", "longMarginRate", "shortMarginRate",
+                    "hasNightTrade", "openTime", "closeTime"]].rename(
+        columns={"contract": "symbol"}
+    )
+    data_ = data[["symbol","direction","product", "minOrderTimestamp", "maxOrderTimestamp",
+                     "minPosTimestamp", "maxPosTimestamp", "amount","price","upLimit","downLimit"]]   # 这里的price是最新价 -> 用于计算vol&volume
+    data_ = pd.merge(data_, info_, how="left", on=["symbol","product"])
+    for _, row in data_.iterrows():         # 每一行->开仓事件
+        marginRate = row["longMarginRate"] if row["direction"] == "long" else row["shortMarginRate"]
+        # 计算vol(手数)以及volume(交易乘数)
+        volume = int((row["amount"] / marginRate) / row["price"])
+        vol = volume - volume % row["multi"]    # 向下取整
+        self.eventIdx += 1
+        E = OrderOpenEvent(  # 初始化对象
+                symbol=row["symbol"],
+                direction=row["direction"],
+                amount=row["amount"],
+                vol=vol,
+                volume=volume,
+                multi=int(row["multi"]),
+                marginRate=marginRate,
+                minTimestamp=pd.Timestamp(row["minOrderTimestamp"]),
+                maxTimestamp=pd.Timestamp(row["maxOrderTimestamp"]),
+                minPosTimestamp=pd.Timestamp.now(),
+                maxPosTimestamp=row["openTime"] + pd.offsets.BusinessDay(3) - pd.offsets.Minute(180),  # 保证3天开盘后自动平仓
+                upLimit=row["upLimit"],
+                downLimit=row["downLimit"],
+                memo=str(self.eventIdx))   # 初始化对象
+        self.eventWait[self.eventIdx] = E
