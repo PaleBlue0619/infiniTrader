@@ -4,18 +4,6 @@ from pythongo.MyPosition import MyPosition
 from pythongo.MyOrder import MyOrder
 from typing import Dict, List
 
-"""
-这里必须抽象出MyBrain -> 作为缓冲层[用户层-MyBrain-回调层]
-Function1: 管理开仓/平仓的行为
-MyBrain->待发送Event
-MyBrain->已发送待收到回报Event
-已完成Event自动销毁
-Function2: 自动补全Event中的属性, 避免回调函数中的重复计算
-整体原则: 先确定eventWait eventDoing中的编号, 再输出执行
-开仓From: 历史未下单的开仓Order + 外部开仓信号csv 
-平仓From: 历史未下单的平仓Order + 监控(止盈止损+最长持仓时间)
-"""
-
 # Event 类重构
 # Event(父类): 包括品种基本信息+方向+时间 symbol direction multi marginRate createTime minTimestamp maxTimestamp
 # Event的子类-

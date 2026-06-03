@@ -17,16 +17,17 @@ from pythongo.utils import KLineGenerator, KLineContainer
 
 """
 交易系统所有功能:
-x: 基本信息(交易时间 + 保证金)写入DolphinDB共享流表 [待测试]
+0: 盘前维护基本信息(交易时间 + 保证金)写入DolphinDB共享流表 [√]
 0. 盘前录入开仓的期货合约(止盈止损最长持仓时间) + 昨日仓位状态 + 昨日订单状态 [待测试]
-1. 开盘挂单开仓 -> on_tick 
+1. 开盘挂单开仓 -> on_bar 中挂单 [待测试] 
 2. on_order中将订单记录写入DolphinDB共享流表 + 调用MyOrder回调更新内存状态 [待测试]
-3. 实时监控持仓 -> on_bar 中平仓
+3. 实时监控持仓 -> on_bar 中平仓 [待测试]
 4. on_trade中将成交记录写入DolphinDB共享流表 + 调用MyPosition回调更新内存状态 [待测试]
-5. 离收盘前半小时撤单 + 禁止下单
+5. 离收盘前半小时撤单 + 禁止下单 [待实现]
 6. 策略暂停时/收盘时 -> 自动保存所有订单状态 + 仓位状态 [待测试]
+x: [!!] 挂单未成交场景会冻结保证金 -> 建议通过短信提醒人工干预或撤单并在on_cancel中实现撤单逻辑
 y: 后续考虑将所有流数据表开启持久化 or 直接用dimensionTable进行代替
-z: TWAP/VWAP进行下单 -> 由于个人交易下单量较小+持仓周期日级别以上, ask1/bid1已经能满足盘口, 所以该需求的优先级不高
+z: TWAP/VWAP下单算法 -> 由于个人交易下单量较小+持仓周期日级别以上, ask1/bid1已经能满足盘口, 所以该需求的优先级不高
 """
 
 class Params(BaseParams):
@@ -165,7 +166,7 @@ class MyStrategy(BaseStrategy):
         # 每个合约获取最近1根1分钟K线
         for exchange, contract in zip(self.monitorExchange, self.monitorContract):
             kline_generator = KLineGenerator(
-                # real_time_callback=None,
+                # real_time_callback=self.on_bar_realTime,
                 callback=self.on_bar,  # bar回调函数
                 exchange=exchange,
                 instrument_id=contract,
@@ -189,7 +190,7 @@ class MyStrategy(BaseStrategy):
 
     def on_tick(self, tick: TickData) -> None:
         """tick回调函数 -> 用于用户级别开平仓"""
-        self.kline_generators[tick.instrument_id].tick_to_kline(tick)
+        self.kline_generators[tick.instrument_id].tick_to_kline(tick, push=True)
         self.priceDict[tick.instrument_id] = tick.last_price
 
     def on_order(self, order: OrderData) -> None:
@@ -272,7 +273,7 @@ class MyStrategy(BaseStrategy):
         currentTime = pd.Timestamp(kline.datetime)
         if self.lastMinute == int(currentTime.minute):   # 说明Bar发生了变动 -> 下一个时间截面
             return
-
+        self.output(f"{kline.symbol}-{pd.Timestamp.now()} onBar trigger")
         self.lastMinute = int(currentTime.minute)
         # 1. 开平仓事件
         deleteList: List[int] = []  # 需要被删除的事件编号
@@ -290,10 +291,11 @@ class MyStrategy(BaseStrategy):
                     volume=event.vol,
                     price=self.priceDict[symbolStr],
                     order_direction=directionStr,
-                    order_type="GFD",  # 报单指令
-                    market=True,    # true: 市价单成交 false: 限价单成交
+                    order_type="FAK",  # 报单指令
+                    market=False,    # true: 市价单成交 false: 限价单成交
                     memo=str(self.eventIdx)
                 )
+                self.output(f"[INFO] 下单成功-orderId:{orderId}")
             else:   # 平仓事件
                 orderId: int = self.auto_close_position(
                     exchange=exchangeStr,
@@ -301,11 +303,12 @@ class MyStrategy(BaseStrategy):
                     order_direction=directionStr,
                     volume=event.vol,
                     price=self.priceDict[symbolStr],
-                    order_type="GFD",
+                    order_type="FAK",
                     shfe_close_first=True,
-                    market=True,  # true: 市价单成交 false: 限价单成交
+                    market=False,  # true: 市价单成交 false: 限价单成交
                     memo=str(self.eventIdx)
                 )
+                self.output(f"[INFO] 下单成功-orderId:{orderId}")
             if orderId not in [-1, None]:   # 执行成功
                 self.eventDoing[orderId] = event
                 deleteList.append(idx)
@@ -314,35 +317,36 @@ class MyStrategy(BaseStrategy):
         if deleteList:
             for idx in deleteList:
                 del self.eventWait[idx]
-
+        self.output(f"[INFO] 当前分钟:{self.lastMinute}:当前eventWait:{self.eventWait}")
         # 2. 多仓: 持仓时间+止盈止损监控事件
         for symbol in self.myPosition.longPos:
             productStr = "".join([i for i in symbol if str(i).isalpha()])
+            exchangeStr = self.infoDict[productStr]["exchange"]
             posList: List[Dict[str, any]] = self.myPosition.longPos[symbol]
             price = self.priceDict[symbol]  # 最新价
             # 止盈止损FIFO触发
             totalVol: int = 0
             for pos in posList:
-                if pos["minPosTimestamp"]:
-                    if currentTime <= pos["minTimestamp"]:
+                if pos["minPosTime"]:
+                    if currentTime <= pos["minPosTime"]:
                         break   # 不需要平仓 + 后面的仓位也不需要检测
-                if pos["maxPosTimestamp"]:
-                    if currentTime >= pos["maxPosTimestamp"]:
-                        totalVol += pos.vol
+                if pos["maxPosTime"]:
+                    if currentTime >= pos["maxPosTime"]:
+                        totalVol += pos["vol"]
                         continue
                 if pos["staticHigh"]:
                     if pos["staticHigh"] <= price:  # 静态最高价
-                        totalVol += pos.vol
+                        totalVol += pos["vol"]
                         continue
                 if pos["staticLow"]:
                     if pos["staticLow"] >= price:  # 静态最低价
-                        totalVol += pos.vol
+                        totalVol += pos["vol"]
                         continue
-            if totalVol > 0:
-                orderId: int = self.self.auto_close_position(
-                    exchange=productStr,
+            if totalVol > 0:    # 多单持仓 -> 卖平
+                orderId: int = self.auto_close_position(
+                    exchange=exchangeStr,
                     instrument_id=symbol,
-                    order_direction="buy",  # Literal["buy","sell"]
+                    order_direction="sell",  # Literal["buy","sell"]
                     volume=totalVol,
                     price=self.priceDict[symbol],
                     order_type="GFD",
@@ -350,6 +354,7 @@ class MyStrategy(BaseStrategy):
                     market=True,  # true: 市价单成交 false: 限价单成交
                     memo=str(self.eventIdx)
                 )
+                self.output(f"[INFO] 多单平仓-{productStr}-{symbol}-{totalVol}下单状态:{orderId}")
                 if orderId not in [-1, None]:   # 下单成功:
                     self.eventIdx += 1
                     E = OrderCloseEvent(symbol=symbol, direction="long", vol=totalVol, memo=str(self.eventIdx))
@@ -360,31 +365,32 @@ class MyStrategy(BaseStrategy):
         # 2. 空仓: 持仓时间+止盈止损监控事件
         for symbol in self.myPosition.shortPos:
             productStr = "".join([i for i in symbol if str(i).isalpha()])
+            exchangeStr = self.infoDict[productStr]["exchange"]
             posList: List[Dict[str, any]] = self.myPosition.shortPos[symbol]
             price = self.priceDict[symbol]  # 最新价
             # 止盈止损FIFO触发
             totalVol: int = 0
             for pos in posList:
-                if pos["minPosTimestamp"]:
-                    if currentTime <= pos["minTimestamp"]:
+                if pos["minPosTime"]:
+                    if currentTime <= pos["minPosTime"]:
                         break   # 不需要平仓 + 后面的仓位也不需要检测
-                if pos["maxPosTimestamp"]:
-                    if currentTime >= pos["maxPosTimestamp"]:
-                        totalVol += pos.vol
+                if pos["maxPosTime"]:
+                    if currentTime >= pos["maxPosTime"]:
+                        totalVol += pos["vol"]
                         continue
                 if pos["staticHigh"]:
                     if pos["staticHigh"] <= price:  # 静态最高价
-                        totalVol += pos.vol
+                        totalVol += pos["vol"]
                         continue
                 if pos["staticLow"]:
                     if pos["staticLow"] >= price:  # 静态最低价
-                        totalVol += pos.vol
+                        totalVol += pos["vol"]
                         continue
-            if totalVol > 0:
-                orderId: int = self.self.auto_close_position(
-                    exchange=productStr,
+            if totalVol > 0:  # 空单持仓 -> 卖平
+                orderId: int = self.auto_close_position(
+                    exchange=exchangeStr,
                     instrument_id=symbol,
-                    order_direction="sell",  # Literal["buy","sell"]
+                    order_direction="buy",  # Literal["buy","sell"]
                     volume=totalVol,
                     price=self.priceDict[symbol],
                     order_type="GFD",
@@ -392,6 +398,7 @@ class MyStrategy(BaseStrategy):
                     market=True,  # true: 市价单成交 false: 限价单成交
                     memo=str(self.eventIdx)
                 )
+                self.output(f"[INFO] 空单平仓-{productStr}-{symbol}-{totalVol}下单状态:{orderId}")
                 if orderId not in [-1, None]:   # 下单成功:
                     self.eventIdx += 1
                     E = OrderCloseEvent(symbol=symbol, direction="short", vol=totalVol, memo=str(self.eventIdx))
@@ -415,7 +422,9 @@ class MyStrategy(BaseStrategy):
             )
         self.output(f"[INFO] 取消订阅行情: {self.monitorContract}")
         # 保存订单信息 & 保存持仓信息
-        self.myPosition.outputPos(direction="long", savePath=self.pathStr, fileName=self.orderFile)
-        self.output("[INFO] Order 状态信息Json5保存完毕")
-        self.myOrder.outputOrder(savePath=self.pathStr, fileName=self.orderFile)
+        self.myPosition.outputPos(direction="long", savePath=self.pathStr, fileName=self.longPosFile)
+        self.myPosition.outputPos(direction="short", savePath=self.pathStr, fileName=self.shortPosFile)
         self.output("[INFO] Position 状态信息Json5保存完毕")
+        self.myOrder.outputOrder(savePath=self.pathStr, fileName=self.orderFile)
+        self.output("[INFO] Order 状态信息Json5保存完毕")
+

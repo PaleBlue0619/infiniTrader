@@ -11,7 +11,7 @@
     "tradeTable": "realTimeTrade",
     "dropTB": true,
     "pathStr": "E://Quant//QuantTrader//infiniTrader//cons",
-    "marginFile": "0522.xls", // from 交易星球保证金数据: https://www.jiaoyixingqiu.com/shouxufei/all
+    "marginFile": "0603.xls", // from 交易星球保证金数据: https://www.jiaoyixingqiu.com/shouxufei/all
     "infiniFile": "infiniTrader.xlsx", // 无限易主力合约实时更新excel
     "longPosFile": "longPos.json5", // 持仓Json5名称
     "shortPosFile": "shortPos.json5",
@@ -27,7 +27,7 @@
   dayTime: 日盘时间
   (剩余信息在on_start中进行补充, 最终输出完整的self.infoDict)
   */
-  "signalFile": null, // "E://Quant//PyBackTest//test//futStrategy//realTimeSignal.csv",
+  "signalFile": "E://Quant//PyBackTest//test//futStrategy//realTimeSignal.csv",
   /*
   强制包含:
   product: 品种名称

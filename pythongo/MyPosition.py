@@ -58,7 +58,12 @@ class MyPosition:
     # 开仓/加仓回调函数
     def openPos(self, direction: str, symbol: str, price: float, vol: int, minPosTime: pd.Timestamp, maxPosTime: pd.Timestamp,
                 staticHigh: float, staticLow: float) -> None:
-        pos = {"price": price, "vol": vol, "minPosTime": minPosTime, "maxPosTime": maxPosTime, "staticHigh": staticHigh, "staticLow": staticLow}
+        pos = {"price": price,
+               "vol": vol,
+               "minPosTime": minPosTime,
+               "maxPosTime": maxPosTime,
+               "staticHigh": staticHigh,
+               "staticLow": staticLow}
         if direction == "long":
             if symbol not in self.longPos:
                 self.longPos[symbol] = [pos]
